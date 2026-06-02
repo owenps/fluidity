@@ -1,5 +1,9 @@
 # `smithing`
 
+<p>
+  <a href="https://www.apple.com/macos/"><kbd><img src="https://cdn.simpleicons.org/apple" width="16" valign="middle" /> macOS</kbd></a>
+</p>
+
 A desktop workspace for coordinating multiple AI coding agents, built to stay flexible around how you work.
 
 `smithing` comes from the simple desire to reduce context switching across multiple applications.
