@@ -1,6 +1,6 @@
 # `smithing`
 
-The single-window workspace engine built for coordinating parallel AI agent tasks across automated, tile-based Git worktrees.
+A desktop workspace for coordinating multiple AI coding agents, built to stay flexible around how you work.
 
 `smithing` comes from the simple desire to reduce context switching across multiple applications.
 
