@@ -1,7 +1,9 @@
 # `smithing`
 
 <p>
-  <a href="https://www.apple.com/macos/"><kbd><img src="https://cdn.simpleicons.org/apple/white" width="16" valign="middle" /> macOS</kbd></a>
+  <a href="https://www.apple.com/macos/"><kbd><img src="https://cdn.simpleicons.org/apple/white" width="16" valign="middle" /> macOS</kbd></a> &nbsp;
+  <a href="https://github.com/owenps/smithing/actions/workflows/checks.yml"><img src="https://github.com/owenps/smithing/actions/workflows/checks.yml/badge.svg" alt="Lint and Check" /></a> &nbsp;
+  <a href="https://github.com/owenps/smithing/tags"><img src="https://img.shields.io/github/v/tag/owenps/smithing?label=release&sort=semver" alt="Latest release tag" /></a>
 </p>
 
 A desktop workspace for coordinating multiple AI coding agents, built to stay flexible around how you work.
