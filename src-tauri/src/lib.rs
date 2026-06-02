@@ -16,6 +16,7 @@ use tauri::{
 };
 use uuid::Uuid;
 
+const APP_NAME: &str = "Smithing";
 const OPEN_SETTINGS_MENU_ID: &str = "settings.open";
 const OPEN_SETTINGS_EVENT: &str = "app://open-settings";
 const OPEN_PROJECT_MENU_ID: &str = "project.open";
@@ -204,6 +205,21 @@ fn project_open(state: State<'_, WorkspaceState>) -> Result<ProjectOpenResponse,
 }
 
 #[tauri::command]
+fn application_reset(
+    workspace_state: State<'_, WorkspaceState>,
+    terminal_state: State<'_, TerminalState>,
+) -> Result<(), String> {
+    workspace_state.projects.lock().map_err(lock_error)?.clear();
+    *workspace_state.context.lock().map_err(lock_error)? = None;
+
+    for (_, mut session) in terminal_state.sessions.lock().map_err(lock_error)?.drain() {
+        let _ = session.child_killer.kill();
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn terminal_create(
     app: AppHandle,
     terminal_state: State<'_, TerminalState>,
@@ -324,6 +340,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             workspace_context,
             project_open,
+            application_reset,
             terminal_create,
             terminal_write,
             terminal_resize,
@@ -355,7 +372,7 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Smithing");
+        .unwrap_or_else(|error| panic!("error while running {APP_NAME}: {error}"));
 }
 
 fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -383,7 +400,7 @@ fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
             #[cfg(target_os = "macos")]
             &Submenu::with_items(
                 app,
-                "Smithing",
+                APP_NAME,
                 true,
                 &[
                     &PredefinedMenuItem::about(app, None, None)?,

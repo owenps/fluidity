@@ -3,9 +3,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { commandIdForKeyboardEvent, createCommands, type AppCommandApi } from "./commands";
 import { KeyCap } from "./KeyCap";
 import { Picker, type PickerItem } from "./Picker";
+import { APP_NAME } from "./appConstants";
+import { resetApplication } from "./applicationClient";
 import { SettingsModal } from "./SettingsModal";
 import { openProject } from "./projectClient";
-import { readAppSettings, writeAppSettings } from "./settings";
+import {
+  clearAppSettings,
+  createDefaultAppSettings,
+  readAppSettings,
+  writeAppSettings,
+} from "./settings";
 import { TerminalTile } from "./TerminalTile";
 import { ToastStack, type AppToast, type ToastSeverity } from "./ToastStack";
 import { createDefaultTiles, splitFocusedTile, type TileSplitDirection } from "./tileLayout";
@@ -66,7 +73,7 @@ export function App() {
       .then(setContext)
       .catch(() => {
         setContext({
-          project: { name: "Smithing", root: "Unavailable outside Tauri", kind: "plain" },
+          project: { name: APP_NAME, root: "Unavailable outside Tauri", kind: "plain" },
           workspace: { name: "POC", root: "." },
           gitBranch: null,
         });
@@ -114,6 +121,33 @@ export function App() {
         });
       });
   }, [addToast]);
+
+  const resetClientState = useCallback(() => {
+    clearAppSettings();
+    setSettings(createDefaultAppSettings(import.meta.env.DEV));
+    setContext(null);
+    setContextLoaded(true);
+    setLayout(createInitialLayout());
+    setTilePickerOpen(false);
+    setSettingsOpen(false);
+  }, []);
+
+  const runResetApplication = useCallback(() => {
+    resetClientState();
+    addToast({
+      severity: "success",
+      title: "You're back at the start",
+      detail: `Choose a project to set up ${APP_NAME} again.`,
+    });
+
+    void resetApplication().catch((error) => {
+      addToast({
+        severity: "error",
+        title: `Could not finish resetting ${APP_NAME}`,
+        detail: String(error),
+      });
+    });
+  }, [addToast, resetClientState]);
 
   const commandApi = useMemo<AppCommandApi>(
     () => ({
@@ -342,7 +376,7 @@ export function App() {
         ) : (
           <div className="empty-workspace-state">
             <div className="empty-workspace-card">
-              <h1>Smithing</h1>
+              <h1>{APP_NAME}</h1>
               <p>Select a project root to start working.</p>
               <button className="primary-button" type="button" onClick={runOpenProject}>
                 Open Project…
@@ -362,6 +396,7 @@ export function App() {
           onTileHeadersVisibleChange={setTileHeadersVisibleSetting}
           tilePickerVisibility={tilePickerVisibility}
           onTilePickerVisibilityChange={setTilePickerItemVisibility}
+          onResetApplication={runResetApplication}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}

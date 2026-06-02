@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { APP_NAME } from "./appConstants";
 import {
   closeTerminalSession,
   createTerminalSession,
@@ -102,7 +103,7 @@ export function TerminalTile({
       sessionIdRef.current = null;
       const exitCode = event.exitCode === null ? "unknown" : String(event.exitCode);
       terminal.writeln("");
-      terminal.writeln(`Smithing terminal exited with code ${exitCode}.`);
+      terminal.writeln(`${APP_NAME} terminal exited with code ${exitCode}.`);
     }).then((disposeListener) => {
       if (disposed) {
         disposeListener();
@@ -129,7 +130,7 @@ export function TerminalTile({
         }
       })
       .catch((error) => {
-        terminal.writeln("Smithing could not start the terminal session.");
+        terminal.writeln(`${APP_NAME} could not start the terminal session.`);
         terminal.writeln(String(error));
       });
 

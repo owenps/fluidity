@@ -71,6 +71,16 @@ export function writeAppSettings(settings: AppSettings) {
   }
 }
 
+export function clearAppSettings() {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.removeItem(settingsStorageKey);
+  } catch {
+    // Ignore storage failures so reset can still clear in-memory state.
+  }
+}
+
 function readTilePickerVisibility(
   value: unknown,
   defaults: TilePickerVisibility,

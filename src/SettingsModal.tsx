@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { APP_NAME } from "./appConstants";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 import { Slider } from "./Slider";
 import { TilePickerSettings } from "./TilePickerSettings";
@@ -13,13 +14,15 @@ type SettingsItemId =
   | "tile-headers"
   | "tile-picker"
   | "keyboard-shortcuts"
-  | "debug-layout";
+  | "debug-layout"
+  | "reset-application";
 const settingsItems: SettingsItemId[] = [
   "terminal-font-size",
   "tile-headers",
   "tile-picker",
   "keyboard-shortcuts",
   "debug-layout",
+  "reset-application",
 ];
 
 interface SettingsModalProps {
@@ -31,6 +34,7 @@ interface SettingsModalProps {
   onTileHeadersVisibleChange: (visible: boolean) => void;
   tilePickerVisibility: TilePickerVisibility;
   onTilePickerVisibilityChange: (itemId: ConfigurableTilePickerItemId, visible: boolean) => void;
+  onResetApplication: () => void;
   onClose: () => void;
 }
 
@@ -43,12 +47,14 @@ export function SettingsModal({
   onTileHeadersVisibleChange,
   tilePickerVisibility,
   onTilePickerVisibilityChange,
+  onResetApplication,
   onClose,
 }: SettingsModalProps) {
   const modalRef = useRef<HTMLElement | null>(null);
   const [activeItemId, setActiveItemId] = useState<SettingsItemId>("terminal-font-size");
   const [tilePickerSettingsOpen, setTilePickerSettingsOpen] = useState(false);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
+  const [resetConfirmationVisible, setResetConfirmationVisible] = useState(false);
 
   useEffect(() => {
     modalRef.current?.focus();
@@ -75,6 +81,15 @@ export function SettingsModal({
     }
   };
 
+  const confirmResetApplication = () => {
+    if (!resetConfirmationVisible) {
+      setResetConfirmationVisible(true);
+      return;
+    }
+
+    onResetApplication();
+  };
+
   const activateItem = () => {
     if (activeItemId === "debug-layout") {
       onDebugLayoutChange(!debugLayout);
@@ -93,6 +108,11 @@ export function SettingsModal({
 
     if (activeItemId === "keyboard-shortcuts") {
       changeKeyboardShortcutsOpen(!keyboardShortcutsOpen);
+      return;
+    }
+
+    if (activeItemId === "reset-application") {
+      confirmResetApplication();
     }
   };
 
@@ -249,6 +269,33 @@ export function SettingsModal({
               <Toggle checked={debugLayout} onCheckedChange={onDebugLayoutChange} />
             </span>
           </label>
+          <div className="settings-danger-zone" aria-label="Danger Zone">
+            <span className="settings-section-title">Danger Zone</span>
+            <button
+              className={[
+                "settings-row",
+                "settings-button-row",
+                "settings-danger-row",
+                activeItemId === "reset-application" ? "settings-row-active" : "",
+              ].join(" ")}
+              type="button"
+              onClick={confirmResetApplication}
+              onMouseEnter={() => setActiveItemId("reset-application")}
+              onFocus={() => setActiveItemId("reset-application")}
+            >
+              <span className="settings-row-copy">
+                <span className="settings-row-title">Reset {APP_NAME}</span>
+                <span className="settings-row-description">
+                  Clear all local data and reset to system defaults.
+                </span>
+              </span>
+              <span className="settings-row-control">
+                <span className="settings-danger-button">
+                  {resetConfirmationVisible ? "Confirm" : "Reset…"}
+                </span>
+              </span>
+            </button>
+          </div>
         </div>
       </section>
     </div>
