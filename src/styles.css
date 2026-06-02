@@ -204,8 +204,8 @@ body {
 
 .toast-stack {
   position: fixed;
-  top: 52px;
   right: 12px;
+  bottom: 12px;
   z-index: 200;
   display: grid;
   width: min(360px, calc(100vw - 24px));
@@ -214,8 +214,11 @@ body {
 }
 
 .toast {
+  --toast-icon: url("./assets/toast-info.svg");
+
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
   gap: 0.75rem;
   padding: 0.75rem;
   border: 1px solid var(--border);
@@ -226,19 +229,37 @@ body {
 }
 
 .toast-success {
-  border-color: var(--primary);
+  --toast-icon: url("./assets/toast-success.svg");
 }
 
 .toast-info {
-  border-color: var(--ring);
+  --toast-icon: url("./assets/toast-info.svg");
 }
 
 .toast-error {
-  border-color: var(--destructive);
+  --toast-icon: url("./assets/toast-error.svg");
+}
+
+.toast-icon {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  background: var(--muted-foreground);
+  mask: var(--toast-icon) center / contain no-repeat;
 }
 
 .toast-copy {
   min-width: 0;
+}
+
+.toast-status-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .toast-copy h2 {
