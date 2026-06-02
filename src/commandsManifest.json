@@ -7,8 +7,8 @@
     "nativeAccelerator": "Cmd+,"
   },
   {
-    "id": "project.open",
-    "title": "Open Project…"
+    "id": "project.add",
+    "title": "Add Project…"
   },
   {
     "id": "tilePicker.open",

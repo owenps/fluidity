@@ -34,6 +34,7 @@ export interface Project {
 }
 
 export interface Workspace {
+  id: string;
   name: string;
   root: string;
 }
@@ -44,10 +45,25 @@ export interface WorkspaceContext {
   gitBranch: string | null;
 }
 
-export interface ProjectOpenResponse {
-  context: WorkspaceContext | null;
+export interface WorkspaceTileState {
+  tiles: Tile[];
+}
+
+export interface CurrentWorkspaceResponse {
+  workspaceId: string;
+  context: WorkspaceContext;
+  tileState: WorkspaceTileState;
+}
+
+export interface ProjectAddResponse {
+  current: CurrentWorkspaceResponse | null;
   project: RegisteredProject | null;
   duplicate: boolean;
+}
+
+export interface WorkspaceTileStateSaveRequest {
+  workspaceId: string;
+  tileState: WorkspaceTileState;
 }
 
 export interface TerminalCreateRequest {

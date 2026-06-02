@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ProjectOpenResponse } from "./types";
+import type { ProjectAddResponse } from "./types";
 
-export function openProject(): Promise<ProjectOpenResponse> {
-  return invoke<ProjectOpenResponse>("project_open");
+export function addProject(): Promise<ProjectAddResponse> {
+  return invoke<ProjectAddResponse>("project_add");
 }

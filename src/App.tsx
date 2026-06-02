@@ -6,7 +6,7 @@ import { Picker, type PickerItem } from "./Picker";
 import { APP_NAME } from "./appConstants";
 import { resetApplication } from "./applicationClient";
 import { SettingsModal } from "./SettingsModal";
-import { openProject } from "./projectClient";
+import { addProject } from "./projectClient";
 import {
   clearAppSettings,
   createDefaultAppSettings,
@@ -22,8 +22,14 @@ import {
   getTilePickerItems,
   type ConfigurableTilePickerItemId,
 } from "./tilePickerCatalog";
-import { GRID_COLUMNS, GRID_ROWS, type Tile, type WorkspaceContext } from "./types";
-import { getWorkspaceContext } from "./workspaceClient";
+import {
+  GRID_COLUMNS,
+  GRID_ROWS,
+  type Tile,
+  type WorkspaceContext,
+  type WorkspaceTileState,
+} from "./types";
+import { getCurrentWorkspace, saveWorkspaceTileState } from "./workspaceClient";
 
 interface LayoutState {
   tiles: Tile[];
@@ -32,7 +38,14 @@ interface LayoutState {
 }
 
 function createInitialLayout(): LayoutState {
-  const tiles = createDefaultTiles();
+  return createLayoutFromTiles(createDefaultTiles());
+}
+
+function createLayoutFromTileState(tileState: WorkspaceTileState): LayoutState {
+  return createLayoutFromTiles(tileState.tiles.length > 0 ? tileState.tiles : createDefaultTiles());
+}
+
+function createLayoutFromTiles(tiles: Tile[]): LayoutState {
   return {
     tiles,
     focusedTileId: tiles[0]?.id ?? null,
@@ -49,6 +62,7 @@ export function App() {
   const [layout, setLayout] = useState<LayoutState>(() => createInitialLayout());
   const [contextLoaded, setContextLoaded] = useState(false);
   const [context, setContext] = useState<WorkspaceContext | null>(null);
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string | null>(null);
   const [tilePickerOpen, setTilePickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<AppToast[]>([]);
@@ -69,14 +83,21 @@ export function App() {
   }, [settings]);
 
   useEffect(() => {
-    void getWorkspaceContext()
-      .then(setContext)
+    void getCurrentWorkspace()
+      .then((current) => {
+        setContext(current?.context ?? null);
+        setCurrentWorkspaceId(current?.workspaceId ?? null);
+        if (current) {
+          setLayout(createLayoutFromTileState(current.tileState));
+        }
+      })
       .catch(() => {
         setContext({
           project: { name: APP_NAME, root: "Unavailable outside Tauri", kind: "plain" },
-          workspace: { name: "POC", root: "." },
+          workspace: { id: "workspace-dev", name: "POC", root: "." },
           gitBranch: null,
         });
+        setCurrentWorkspaceId(null);
       })
       .finally(() => setContextLoaded(true));
   }, []);
@@ -97,26 +118,27 @@ export function App() {
     [dismissToast],
   );
 
-  const runOpenProject = useCallback(() => {
-    void openProject()
+  const runAddProject = useCallback(() => {
+    void addProject()
       .then((response) => {
-        if (!response.context) return;
+        if (!response.current) return;
 
-        setContext(response.context);
+        setContext(response.current.context);
+        setCurrentWorkspaceId(response.current.workspaceId);
         setContextLoaded(true);
-        setLayout(createInitialLayout());
+        setLayout(createLayoutFromTileState(response.current.tileState));
         setTilePickerOpen(false);
         setSettingsOpen(false);
         addToast({
           severity: response.duplicate ? "info" : "success",
-          title: response.duplicate ? "Project already registered" : "Project opened",
-          detail: response.context.project.root,
+          title: response.duplicate ? "Project already registered" : "Project added",
+          detail: response.current.context.workspace.root,
         });
       })
       .catch((error) => {
         addToast({
           severity: "error",
-          title: "Could not open project",
+          title: "Could not add project",
           detail: String(error),
         });
       });
@@ -126,6 +148,7 @@ export function App() {
     clearAppSettings();
     setSettings(createDefaultAppSettings(import.meta.env.DEV));
     setContext(null);
+    setCurrentWorkspaceId(null);
     setContextLoaded(true);
     setLayout(createInitialLayout());
     setTilePickerOpen(false);
@@ -133,20 +156,22 @@ export function App() {
   }, []);
 
   const runResetApplication = useCallback(() => {
-    resetClientState();
-    addToast({
-      severity: "success",
-      title: "You're back at the start",
-      detail: `Choose a project to set up ${APP_NAME} again.`,
-    });
-
-    void resetApplication().catch((error) => {
-      addToast({
-        severity: "error",
-        title: `Could not finish resetting ${APP_NAME}`,
-        detail: String(error),
+    void resetApplication()
+      .then(() => {
+        resetClientState();
+        addToast({
+          severity: "success",
+          title: "You're back at the start",
+          detail: `Choose a project to set up ${APP_NAME} again.`,
+        });
+      })
+      .catch((error) => {
+        addToast({
+          severity: "error",
+          title: `Could not finish resetting ${APP_NAME}`,
+          detail: String(error),
+        });
       });
-    });
   }, [addToast, resetClientState]);
 
   const commandApi = useMemo<AppCommandApi>(
@@ -166,9 +191,9 @@ export function App() {
       },
       openTilePicker: () => setTilePickerOpen(true),
       openSettings: () => setSettingsOpen(true),
-      openProject: runOpenProject,
+      addProject: runAddProject,
     }),
-    [runOpenProject],
+    [runAddProject],
   );
 
   useEffect(() => {
@@ -180,14 +205,27 @@ export function App() {
       })
       .catch(() => {});
 
-    void listen("app://open-project", runOpenProject)
-      .then((unlistenOpenProjectEvent) => {
-        unlistenFns.push(unlistenOpenProjectEvent);
+    void listen("app://add-project", runAddProject)
+      .then((unlistenAddProjectEvent) => {
+        unlistenFns.push(unlistenAddProjectEvent);
       })
       .catch(() => {});
 
     return () => unlistenFns.forEach((unlisten) => unlisten());
-  }, [runOpenProject]);
+  }, [runAddProject]);
+
+  useEffect(() => {
+    if (!contextLoaded || !currentWorkspaceId) return;
+
+    const saveTimer = window.setTimeout(() => {
+      void saveWorkspaceTileState({
+        workspaceId: currentWorkspaceId,
+        tileState: { tiles: layout.tiles },
+      }).catch(() => {});
+    }, 400);
+
+    return () => window.clearTimeout(saveTimer);
+  }, [contextLoaded, currentWorkspaceId, layout.tiles]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -377,9 +415,9 @@ export function App() {
           <div className="empty-workspace-state">
             <div className="empty-workspace-card">
               <h1>{APP_NAME}</h1>
-              <p>Select a project root to start working.</p>
-              <button className="primary-button" type="button" onClick={runOpenProject}>
-                Open Project…
+              <p>Add a project root to start working.</p>
+              <button className="primary-button" type="button" onClick={runAddProject}>
+                Add Project…
               </button>
             </div>
           </div>

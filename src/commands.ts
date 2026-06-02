@@ -22,7 +22,7 @@ export interface AppCommandApi {
   setFocusModeTileId: (updater: (tileId: string | null) => string | null) => void;
   openTilePicker: () => void;
   openSettings: () => void;
-  openProject: () => void;
+  addProject: () => void;
 }
 
 export interface Command {
@@ -112,10 +112,10 @@ function behaviorForCommand(commandId: string): Pick<Command, "canRun" | "run"> 
     };
   }
 
-  if (commandId === "project.open") {
+  if (commandId === "project.add") {
     return {
       canRun: () => true,
-      run: (api) => api.openProject(),
+      run: (api) => api.addProject(),
     };
   }
 
