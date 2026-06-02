@@ -27,13 +27,6 @@ const terminalTilePickerItem = {
 export const configurableTilePickerItems = [
   terminalTilePickerItem,
   {
-    id: "pi",
-    title: "Pi",
-    icon: <img className="picker-option-logo" src={piLogoUrl} alt="" />,
-    initialCommand: "pi",
-    defaultVisible: false,
-  },
-  {
     id: "claude",
     title: "Claude",
     icon: (
@@ -52,6 +45,15 @@ export const configurableTilePickerItems = [
     defaultVisible: false,
   },
   {
+    id: "gemini",
+    title: "Gemini",
+    icon: (
+      <img className="picker-option-logo picker-option-logo-plain" src={geminiLogoUrl} alt="" />
+    ),
+    initialCommand: "gemini",
+    defaultVisible: false,
+  },
+  {
     id: "opencode",
     title: "OpenCode",
     icon: <img className="picker-option-logo" src={opencodeLogoUrl} alt="" />,
@@ -59,12 +61,10 @@ export const configurableTilePickerItems = [
     defaultVisible: false,
   },
   {
-    id: "gemini",
-    title: "Gemini",
-    icon: (
-      <img className="picker-option-logo picker-option-logo-plain" src={geminiLogoUrl} alt="" />
-    ),
-    initialCommand: "gemini",
+    id: "pi",
+    title: "Pi",
+    icon: <img className="picker-option-logo" src={piLogoUrl} alt="" />,
+    initialCommand: "pi",
     defaultVisible: false,
   },
 ] as const;
