@@ -32,7 +32,7 @@ export function TilePickerSettings({
     {},
   );
   const visibleCount = configurableTilePickerItems.filter((item) => visibility[item.id]).length;
-  const summary = `${visibleCount} of ${configurableTilePickerItems.length} optional tile types visible`;
+  const summary = `${visibleCount} of ${configurableTilePickerItems.length} tile types visible`;
 
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();

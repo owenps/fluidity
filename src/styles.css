@@ -202,6 +202,78 @@ body {
   outline-offset: 2px;
 }
 
+.toast-stack {
+  position: fixed;
+  top: 52px;
+  right: 12px;
+  z-index: 200;
+  display: grid;
+  width: min(360px, calc(100vw - 24px));
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+  pointer-events: auto;
+}
+
+.toast-success {
+  border-color: var(--primary);
+}
+
+.toast-info {
+  border-color: var(--ring);
+}
+
+.toast-error {
+  border-color: var(--destructive);
+}
+
+.toast-copy {
+  min-width: 0;
+}
+
+.toast-copy h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.toast-copy p {
+  margin: 0.35rem 0 0;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.toast-dismiss {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.toast-dismiss:hover {
+  color: var(--foreground);
+}
+
 .workspace-shell {
   min-height: 0;
   padding: 8px;
@@ -216,6 +288,58 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
+}
+
+.empty-workspace-state {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.empty-workspace-card {
+  display: grid;
+  justify-items: center;
+  width: min(420px, calc(100vw - 48px));
+  gap: 0.85rem;
+  padding: 2rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--card-foreground);
+  text-align: center;
+}
+
+.empty-workspace-card h1 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.empty-workspace-card p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.primary-button {
+  min-height: 34px;
+  padding: 0 0.85rem;
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.primary-button:hover,
+.primary-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .tile {
@@ -774,6 +898,10 @@ body {
   border: 1px solid var(--border);
   border-top: 0;
   background: var(--popover);
+}
+
+.settings-inline-panel:focus {
+  outline: none;
 }
 
 .settings-inline-panel-header {

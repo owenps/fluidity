@@ -18,9 +18,19 @@ export interface Tile {
   h: number;
 }
 
+export type ProjectKind = "git" | "plain";
+
+export interface RegisteredProject {
+  id: string;
+  name: string;
+  root: string;
+  kind: ProjectKind;
+}
+
 export interface Project {
   name: string;
   root: string;
+  kind: ProjectKind;
 }
 
 export interface Workspace {
@@ -32,6 +42,12 @@ export interface WorkspaceContext {
   project: Project;
   workspace: Workspace;
   gitBranch: string | null;
+}
+
+export interface ProjectOpenResponse {
+  context: WorkspaceContext | null;
+  project: RegisteredProject | null;
+  duplicate: boolean;
 }
 
 export interface TerminalCreateRequest {

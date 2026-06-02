@@ -1,11 +1,13 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { commandIdForKeyboardEvent, createCommands, type AppCommandApi } from "./commands";
 import { KeyCap } from "./KeyCap";
 import { Picker, type PickerItem } from "./Picker";
 import { SettingsModal } from "./SettingsModal";
+import { openProject } from "./projectClient";
 import { readAppSettings, writeAppSettings } from "./settings";
 import { TerminalTile } from "./TerminalTile";
+import { ToastStack, type AppToast, type ToastSeverity } from "./ToastStack";
 import { createDefaultTiles, splitFocusedTile, type TileSplitDirection } from "./tileLayout";
 import {
   findTilePickerItem,
@@ -38,9 +40,11 @@ export function App() {
     [commands],
   );
   const [layout, setLayout] = useState<LayoutState>(() => createInitialLayout());
+  const [contextLoaded, setContextLoaded] = useState(false);
   const [context, setContext] = useState<WorkspaceContext | null>(null);
   const [tilePickerOpen, setTilePickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toasts, setToasts] = useState<AppToast[]>([]);
   const [settings, setSettings] = useState(() => readAppSettings(import.meta.env.DEV));
   const { debugLayout, terminalFontSize, tileHeadersVisible, tilePickerVisibility } = settings;
   const layoutRef = useRef(layout);
@@ -62,12 +66,54 @@ export function App() {
       .then(setContext)
       .catch(() => {
         setContext({
-          project: { name: "Smithing", root: "Unavailable outside Tauri" },
+          project: { name: "Smithing", root: "Unavailable outside Tauri", kind: "plain" },
           workspace: { name: "POC", root: "." },
           gitBranch: null,
         });
-      });
+      })
+      .finally(() => setContextLoaded(true));
   }, []);
+
+  const dismissToast = useCallback((toastId: string) => {
+    setToasts((previous) => previous.filter((toast) => toast.id !== toastId));
+  }, []);
+
+  const addToast = useCallback(
+    (toast: { severity: ToastSeverity; title: string; detail?: string }) => {
+      const id = crypto.randomUUID();
+      setToasts((previous) => previous.concat({ id, ...toast }));
+
+      if (toast.severity !== "error") {
+        window.setTimeout(() => dismissToast(id), 4000);
+      }
+    },
+    [dismissToast],
+  );
+
+  const runOpenProject = useCallback(() => {
+    void openProject()
+      .then((response) => {
+        if (!response.context) return;
+
+        setContext(response.context);
+        setContextLoaded(true);
+        setLayout(createInitialLayout());
+        setTilePickerOpen(false);
+        setSettingsOpen(false);
+        addToast({
+          severity: response.duplicate ? "info" : "success",
+          title: response.duplicate ? "Project already registered" : "Project opened",
+          detail: response.context.project.root,
+        });
+      })
+      .catch((error) => {
+        addToast({
+          severity: "error",
+          title: "Could not open project",
+          detail: String(error),
+        });
+      });
+  }, [addToast]);
 
   const commandApi = useMemo<AppCommandApi>(
     () => ({
@@ -86,21 +132,28 @@ export function App() {
       },
       openTilePicker: () => setTilePickerOpen(true),
       openSettings: () => setSettingsOpen(true),
+      openProject: runOpenProject,
     }),
-    [],
+    [runOpenProject],
   );
 
   useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
+    const unlistenFns: UnlistenFn[] = [];
 
     void listen("app://open-settings", () => setSettingsOpen(true))
       .then((unlistenSettingsEvent) => {
-        unlisten = unlistenSettingsEvent;
+        unlistenFns.push(unlistenSettingsEvent);
       })
       .catch(() => {});
 
-    return () => unlisten?.();
-  }, []);
+    void listen("app://open-project", runOpenProject)
+      .then((unlistenOpenProjectEvent) => {
+        unlistenFns.push(unlistenOpenProjectEvent);
+      })
+      .catch(() => {});
+
+    return () => unlistenFns.forEach((unlisten) => unlisten());
+  }, [runOpenProject]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -136,6 +189,8 @@ export function App() {
   }, [commandApi, commandById, settingsOpen, tilePickerOpen]);
 
   const workspaceRoot = context?.workspace.root;
+  const showGitBranch = Boolean(context?.gitBranch && context.gitBranch !== context.workspace.name);
+  const projectName = context?.project.name ?? (contextLoaded ? "" : "Loading project");
 
   const setDebugLayoutSetting = (debugLayout: boolean) => {
     setSettings((previous) => ({ ...previous, debugLayout }));
@@ -191,10 +246,14 @@ export function App() {
       <header className="top-bar" data-tauri-drag-region>
         <div className="traffic-light-spacer" data-tauri-drag-region />
         <div className="scope" data-tauri-drag-region>
-          <span>{context?.project.name ?? "Loading project"}</span>
-          <span className="separator">/</span>
-          <span>{context?.workspace.name ?? "Loading workspace"}</span>
-          {context?.gitBranch ? (
+          <span>{projectName}</span>
+          {context ? (
+            <>
+              <span className="separator">/</span>
+              <span>{context.workspace.name}</span>
+            </>
+          ) : null}
+          {showGitBranch && context?.gitBranch ? (
             <span className="scope-branch" title={`Git branch: ${context.gitBranch}`}>
               <span className="scope-branch-icon" aria-hidden="true" />
               <span className="scope-branch-label">{context.gitBranch}</span>
@@ -203,78 +262,94 @@ export function App() {
         </div>
       </header>
 
-      <section className="workspace-shell" aria-label="Workspace">
-        <div
-          className="workspace-grid"
-          style={
-            {
-              "--grid-columns": GRID_COLUMNS,
-              "--grid-rows": GRID_ROWS,
-            } as CSSProperties
-          }
-        >
-          {layout.tiles.map((tile) => {
-            const focused = tile.id === layout.focusedTileId;
-            const focusMode = tile.id === layout.focusModeTileId;
-            const hiddenByFocusMode = Boolean(layout.focusModeTileId && !focusMode);
-            const tilePickerItem = findTilePickerItemForTile(tile);
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
 
-            return (
-              <article
-                key={tile.id}
-                className={[
-                  "tile",
-                  focused ? "tile-focused" : "",
-                  focusMode ? "tile-focus-mode" : "",
-                  hiddenByFocusMode ? "tile-hidden-by-focus-mode" : "",
-                  tileHeadersVisible ? "" : "tile-header-hidden",
-                ].join(" ")}
-                style={
-                  {
-                    "--tile-x": tile.x,
-                    "--tile-y": tile.y,
-                    "--tile-w": tile.w,
-                    "--tile-h": tile.h,
-                  } as CSSProperties
-                }
-                onMouseDown={() =>
-                  setLayout((previous) => ({ ...previous, focusedTileId: tile.id }))
-                }
-              >
-                <div className="tile-titlebar">
-                  <span className="tile-title">
-                    <span className="tile-title-icon" aria-hidden="true">
-                      {tilePickerItem.icon}
+      <section className="workspace-shell" aria-label="Workspace">
+        {!contextLoaded ? (
+          <div className="empty-workspace-state">Loading project…</div>
+        ) : context ? (
+          <div
+            className="workspace-grid"
+            style={
+              {
+                "--grid-columns": GRID_COLUMNS,
+                "--grid-rows": GRID_ROWS,
+              } as CSSProperties
+            }
+          >
+            {layout.tiles.map((tile) => {
+              const focused = tile.id === layout.focusedTileId;
+              const focusMode = tile.id === layout.focusModeTileId;
+              const hiddenByFocusMode = Boolean(layout.focusModeTileId && !focusMode);
+              const tilePickerItem = findTilePickerItemForTile(tile);
+
+              return (
+                <article
+                  key={tile.id}
+                  className={[
+                    "tile",
+                    focused ? "tile-focused" : "",
+                    focusMode ? "tile-focus-mode" : "",
+                    hiddenByFocusMode ? "tile-hidden-by-focus-mode" : "",
+                    tileHeadersVisible ? "" : "tile-header-hidden",
+                  ].join(" ")}
+                  style={
+                    {
+                      "--tile-x": tile.x,
+                      "--tile-y": tile.y,
+                      "--tile-w": tile.w,
+                      "--tile-h": tile.h,
+                    } as CSSProperties
+                  }
+                  onMouseDown={() =>
+                    setLayout((previous) => ({ ...previous, focusedTileId: tile.id }))
+                  }
+                >
+                  <div className="tile-titlebar">
+                    <span className="tile-title">
+                      <span className="tile-title-icon" aria-hidden="true">
+                        {tilePickerItem.icon}
+                      </span>
+                      <span className="tile-title-text">{tile.title}</span>
                     </span>
-                    <span className="tile-title-text">{tile.title}</span>
-                  </span>
-                  {focusMode ? (
-                    <span className="tile-focus-badge">
-                      Focus mode · <KeyCap size="compact">Esc</KeyCap>
-                    </span>
-                  ) : (
-                    <span className="tile-meta">
-                      {tile.x},{tile.y} {tile.w}×{tile.h}
-                    </span>
-                  )}
-                </div>
-                <div className="tile-body">
-                  {workspaceRoot ? (
-                    <TerminalTile
-                      tileId={tile.id}
-                      cwd={workspaceRoot}
-                      active={focused}
-                      initialCommand={tile.initialCommand}
-                      terminalFontSize={terminalFontSize}
-                    />
-                  ) : (
-                    <div className="tile-placeholder">Loading workspace…</div>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
+                    {focusMode ? (
+                      <span className="tile-focus-badge">
+                        Focus mode · <KeyCap size="compact">Esc</KeyCap>
+                      </span>
+                    ) : (
+                      <span className="tile-meta">
+                        {tile.x},{tile.y} {tile.w}×{tile.h}
+                      </span>
+                    )}
+                  </div>
+                  <div className="tile-body">
+                    {workspaceRoot ? (
+                      <TerminalTile
+                        tileId={tile.id}
+                        cwd={workspaceRoot}
+                        active={focused}
+                        initialCommand={tile.initialCommand}
+                        terminalFontSize={terminalFontSize}
+                      />
+                    ) : (
+                      <div className="tile-placeholder">Loading workspace…</div>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty-workspace-state">
+            <div className="empty-workspace-card">
+              <h1>Smithing</h1>
+              <p>Select a project root to start working.</p>
+              <button className="primary-button" type="button" onClick={runOpenProject}>
+                Open Project…
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       {settingsOpen ? (

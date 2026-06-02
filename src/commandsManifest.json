@@ -7,6 +7,10 @@
     "nativeAccelerator": "Cmd+,"
   },
   {
+    "id": "project.open",
+    "title": "Open Project…"
+  },
+  {
     "id": "tilePicker.open",
     "title": "Create New Tile",
     "shortcutGroup": "General",

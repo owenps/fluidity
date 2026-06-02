@@ -12,13 +12,20 @@ export interface TilePickerCatalogItem {
   initialCommand?: string;
 }
 
-const terminalTilePickerItem: TilePickerCatalogItem = {
+interface ConfigurableTilePickerCatalogItem extends TilePickerCatalogItem {
+  defaultVisible: boolean;
+}
+
+const terminalTilePickerItem = {
   id: "terminal",
   title: "Terminal",
   icon: <span>&gt;_</span>,
-};
+  initialCommand: undefined,
+  defaultVisible: true,
+} as const satisfies ConfigurableTilePickerCatalogItem;
 
 export const configurableTilePickerItems = [
+  terminalTilePickerItem,
   {
     id: "pi",
     title: "Pi",
@@ -72,14 +79,10 @@ export function createDefaultTilePickerVisibility(): TilePickerVisibility {
 }
 
 export function getTilePickerItems(visibility: TilePickerVisibility): TilePickerCatalogItem[] {
-  return [
-    terminalTilePickerItem,
-    ...configurableTilePickerItems.filter((item) => visibility[item.id]),
-  ];
+  return configurableTilePickerItems.filter((item) => visibility[item.id]);
 }
 
 export function findTilePickerItem(itemId: string): TilePickerCatalogItem | undefined {
-  if (itemId === terminalTilePickerItem.id) return terminalTilePickerItem;
   return configurableTilePickerItems.find((item) => item.id === itemId);
 }
 

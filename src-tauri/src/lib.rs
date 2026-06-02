@@ -1,8 +1,9 @@
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{hash_map::DefaultHasher, HashMap},
     env,
+    hash::{Hash, Hasher},
     io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
@@ -10,14 +11,30 @@ use std::{
     thread,
 };
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{IconMenuItem, Menu, NativeIcon, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Listener, Manager, State,
 };
 use uuid::Uuid;
 
 const OPEN_SETTINGS_MENU_ID: &str = "settings.open";
 const OPEN_SETTINGS_EVENT: &str = "app://open-settings";
+const OPEN_PROJECT_MENU_ID: &str = "project.open";
+const OPEN_PROJECT_EVENT: &str = "app://open-project";
 const COMMANDS_MANIFEST_JSON: &str = include_str!("../../src/commandsManifest.json");
+
+struct WorkspaceState {
+    projects: Mutex<Vec<RegisteredProject>>,
+    context: Mutex<Option<WorkspaceContext>>,
+}
+
+impl WorkspaceState {
+    fn new() -> Self {
+        Self {
+            projects: Mutex::new(Vec::new()),
+            context: Mutex::new(None),
+        }
+    }
+}
 
 #[derive(Default)]
 struct TerminalState {
@@ -87,7 +104,7 @@ struct CommandManifestEntry {
     native_accelerator: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceContext {
     project: ProjectContext,
@@ -95,47 +112,106 @@ struct WorkspaceContext {
     git_branch: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ProjectContext {
     name: String,
     root: String,
+    kind: ProjectKind,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct WorkspaceContextInfo {
     name: String,
     root: String,
 }
 
-#[tauri::command]
-fn workspace_context() -> Result<WorkspaceContext, String> {
-    let root = current_workspace_root().map_err(|error| error.to_string())?;
-    let name = root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("Smithing")
-        .to_string();
-    let root = root.to_string_lossy().to_string();
-    let git_branch = git_branch_for_root(&root);
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectOpenResponse {
+    context: Option<WorkspaceContext>,
+    project: Option<RegisteredProject>,
+    duplicate: bool,
+}
 
-    Ok(WorkspaceContext {
-        project: ProjectContext {
-            name: name.clone(),
-            root: root.clone(),
-        },
-        workspace: WorkspaceContextInfo { name, root },
-        git_branch,
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RegisteredProject {
+    id: String,
+    name: String,
+    root: String,
+    kind: ProjectKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ProjectKind {
+    Git,
+    Plain,
+}
+
+#[tauri::command]
+fn workspace_context(state: State<'_, WorkspaceState>) -> Result<Option<WorkspaceContext>, String> {
+    state
+        .context
+        .lock()
+        .map_err(lock_error)
+        .map(|context| context.clone())
+}
+
+#[tauri::command]
+fn project_open(state: State<'_, WorkspaceState>) -> Result<ProjectOpenResponse, String> {
+    let Some(selected_root) = rfd::FileDialog::new()
+        .set_title("Open Project")
+        .pick_folder()
+    else {
+        return Ok(ProjectOpenResponse {
+            context: None,
+            project: None,
+            duplicate: false,
+        });
+    };
+
+    let canonical_root = selected_root
+        .canonicalize()
+        .map_err(|error| format!("Could not read selected project root: {error}"))?;
+    if !canonical_root.is_dir() {
+        return Err("Selected project root is not a directory".to_string());
+    }
+
+    let canonical_root = path_to_string(&canonical_root);
+    let mut projects = state.projects.lock().map_err(lock_error)?;
+    let (project, duplicate) = if let Some(project) = projects
+        .iter()
+        .find(|project| project.root == canonical_root)
+        .cloned()
+    {
+        (project, true)
+    } else {
+        let project = registered_project_for_root(Path::new(&canonical_root));
+        projects.push(project.clone());
+        (project, false)
+    };
+    drop(projects);
+
+    let context = workspace_context_for_project(&project);
+    *state.context.lock().map_err(lock_error)? = Some(context.clone());
+
+    Ok(ProjectOpenResponse {
+        context: Some(context),
+        project: Some(project),
+        duplicate,
     })
 }
 
 #[tauri::command]
 fn terminal_create(
     app: AppHandle,
-    state: State<'_, TerminalState>,
+    terminal_state: State<'_, TerminalState>,
+    workspace_state: State<'_, WorkspaceState>,
     request: TerminalCreateRequest,
 ) -> Result<TerminalCreateResponse, String> {
     let session_id = format!("terminal-{}", Uuid::new_v4());
-    let cwd = normalize_cwd(&request.cwd)?;
+    let cwd = normalize_cwd(&workspace_state, &request.cwd)?;
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -169,7 +245,7 @@ fn terminal_create(
         .take_writer()
         .map_err(|error| error.to_string())?;
 
-    state.sessions.lock().map_err(lock_error)?.insert(
+    terminal_state.sessions.lock().map_err(lock_error)?.insert(
         session_id.clone(),
         TerminalSession {
             master: pair.master,
@@ -243,9 +319,11 @@ fn terminal_close(
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(WorkspaceState::new())
         .manage(TerminalState::default())
         .invoke_handler(tauri::generate_handler![
             workspace_context,
+            project_open,
             terminal_create,
             terminal_write,
             terminal_resize,
@@ -258,6 +336,9 @@ pub fn run() {
             app.on_menu_event(|app, event| {
                 if event.id() == OPEN_SETTINGS_MENU_ID {
                     let _ = app.emit(OPEN_SETTINGS_EVENT, ());
+                }
+                if event.id() == OPEN_PROJECT_MENU_ID {
+                    let _ = app.emit(OPEN_PROJECT_EVENT, ());
                 }
             });
 
@@ -279,12 +360,21 @@ pub fn run() {
 
 fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let settings_accelerator = native_accelerator_for_command(OPEN_SETTINGS_MENU_ID);
-    let settings = MenuItem::with_id(
+    let settings = IconMenuItem::with_id_and_native_icon(
         app,
         OPEN_SETTINGS_MENU_ID,
         "Settings…",
         true,
+        Some(NativeIcon::PreferencesGeneral),
         settings_accelerator.as_deref(),
+    )?;
+    let open_project = IconMenuItem::with_id_and_native_icon(
+        app,
+        OPEN_PROJECT_MENU_ID,
+        "Open Project…",
+        true,
+        Some(NativeIcon::Add),
+        None::<&str>,
     )?;
 
     Menu::with_items(
@@ -313,7 +403,11 @@ fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
                 app,
                 "File",
                 true,
-                &[&PredefinedMenuItem::close_window(app, None)?],
+                &[
+                    &open_project,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::close_window(app, None)?,
+                ],
             )?,
             #[cfg(not(any(
                 target_os = "macos",
@@ -328,6 +422,8 @@ fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
                 "File",
                 true,
                 &[
+                    &open_project,
+                    &PredefinedMenuItem::separator(app)?,
                     &settings,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::close_window(app, None)?,
@@ -426,14 +522,60 @@ fn spawn_wait_thread(app: AppHandle, session_id: String, mut child: Box<dyn Chil
     });
 }
 
-fn current_workspace_root() -> Result<PathBuf, std::io::Error> {
-    let cwd = env::current_dir()?;
-    if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
-        if let Some(parent) = cwd.parent() {
-            return Ok(parent.to_path_buf());
-        }
+fn registered_project_for_root(root: &Path) -> RegisteredProject {
+    let root = path_to_string(root);
+    RegisteredProject {
+        id: project_id_for_root(&root),
+        name: project_name_for_root(Path::new(&root)),
+        kind: project_kind_for_root(&root),
+        root,
     }
-    Ok(cwd)
+}
+
+fn workspace_context_for_project(project: &RegisteredProject) -> WorkspaceContext {
+    let git_branch = if project.kind == ProjectKind::Git {
+        git_branch_for_root(&project.root)
+    } else {
+        None
+    };
+    let workspace_name = match project.kind {
+        ProjectKind::Git => git_branch.clone().unwrap_or_else(|| "Git".to_string()),
+        ProjectKind::Plain => "Home".to_string(),
+    };
+
+    WorkspaceContext {
+        project: ProjectContext {
+            name: project.name.clone(),
+            root: project.root.clone(),
+            kind: project.kind,
+        },
+        workspace: WorkspaceContextInfo {
+            name: workspace_name,
+            root: project.root.clone(),
+        },
+        git_branch,
+    }
+}
+
+fn project_name_for_root(root: &Path) -> String {
+    root.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Project")
+        .to_string()
+}
+
+fn project_id_for_root(root: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    root.hash(&mut hasher);
+    format!("project-{:016x}", hasher.finish())
+}
+
+fn project_kind_for_root(root: &str) -> ProjectKind {
+    if git_output(root, &["rev-parse", "--is-inside-work-tree"]).as_deref() == Some("true") {
+        ProjectKind::Git
+    } else {
+        ProjectKind::Plain
+    }
 }
 
 fn git_branch_for_root(root: &str) -> Option<String> {
@@ -460,9 +602,18 @@ fn git_output(root: &str, args: &[&str]) -> Option<String> {
     }
 }
 
-fn normalize_cwd(cwd: &str) -> Result<PathBuf, String> {
-    let workspace_root = current_workspace_root()
-        .and_then(|root| root.canonicalize())
+fn normalize_cwd(workspace_state: &WorkspaceState, cwd: &str) -> Result<PathBuf, String> {
+    let workspace_root = workspace_state
+        .context
+        .lock()
+        .map_err(lock_error)?
+        .as_ref()
+        .ok_or_else(|| "no workspace is open".to_string())?
+        .workspace
+        .root
+        .clone();
+    let workspace_root = PathBuf::from(workspace_root)
+        .canonicalize()
         .map_err(|error| error.to_string())?;
     let path = Path::new(cwd);
     let candidate = if path.is_absolute() {
@@ -479,6 +630,10 @@ fn normalize_cwd(cwd: &str) -> Result<PathBuf, String> {
     }
 
     Ok(canonical_candidate)
+}
+
+fn path_to_string(path: &Path) -> String {
+    path.to_string_lossy().to_string()
 }
 
 fn lock_error<T>(error: std::sync::PoisonError<T>) -> String {

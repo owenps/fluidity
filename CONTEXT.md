@@ -20,6 +20,10 @@ _Avoid_: Window, session, branch
 A branch owned by one git-backed workspace and used as the change surface for that stream of work.
 _Avoid_: Feature branch, task branch
 
+**Home Workspace**:
+The default workspace for a project that is not backed by git, rooted at the project root.
+_Avoid_: Main workspace, default workspace
+
 **Discarded Workspace**:
 A workspace that has been intentionally removed from Smithing and deleted from disk by the user.
 _Avoid_: Archived workspace, closed workspace, hidden workspace
@@ -55,3 +59,11 @@ _Avoid_: Preferences, config
 **Project Settings**:
 Preferences that apply to one project.
 _Avoid_: Repository settings, folder settings
+
+**Registered Project**:
+A project root saved in Smithing so the user can reopen and manage it later.
+_Avoid_: Recent folder, repository bookmark, workspace
+
+**Project Registry**:
+The global collection of registered projects known to Smithing.
+_Avoid_: Project settings, recent projects, folder list
