@@ -23,7 +23,7 @@ const ADD_PROJECT_MENU_ID: &str = "project.add";
 const ADD_PROJECT_EVENT: &str = "app://add-project";
 const COMMANDS_MANIFEST_JSON: &str = include_str!("../../src/commandsManifest.json");
 const APP_STATE_FILE: &str = "app-state.json";
-const APP_STATE_VERSION: u32 = 1;
+const APP_STATE_VERSION: u32 = 2;
 const GRID_COLUMNS: i32 = 12;
 const GRID_ROWS: i32 = 8;
 const MIN_TILE_WIDTH: i32 = 3;
@@ -117,11 +117,23 @@ struct PersistedTile {
     id: String,
     kind: String,
     title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resume: Option<TileResumeMetadata>,
+    #[serde(default, skip_serializing)]
     initial_command: Option<String>,
     x: i32,
     y: i32,
     w: i32,
     h: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TileResumeMetadata {
+    provider: String,
+    identifier: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,12 +150,23 @@ struct TerminalCreateRequest {
     cwd: String,
     cols: u16,
     rows: u16,
+    launch: TerminalLaunchRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalLaunchRequest {
+    kind: String,
+    tool_id: Option<String>,
+    resume: Option<TileResumeMetadata>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerminalCreateResponse {
     session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assigned_resume: Option<TileResumeMetadata>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,8 +376,8 @@ fn terminal_create(
         })
         .map_err(|error| error.to_string())?;
 
-    let mut command = CommandBuilder::new(shell);
-    command.cwd(cwd);
+    let launch_plan = terminal_launch_plan(&request.launch)?;
+    let mut command = terminal_command(&shell, cwd, &launch_plan);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     command.env("SMITHING_TILE_ID", request.tile_id);
@@ -387,7 +410,10 @@ fn terminal_create(
     spawn_output_thread(app.clone(), session_id.clone(), reader);
     spawn_wait_thread(app, session_id.clone(), child);
 
-    Ok(TerminalCreateResponse { session_id })
+    Ok(TerminalCreateResponse {
+        session_id,
+        assigned_resume: launch_plan.assigned_resume,
+    })
 }
 
 #[tauri::command]
@@ -614,11 +640,12 @@ fn load_app_state(state_path: &Path) -> PersistedAppState {
         return PersistedAppState::default();
     };
 
-    if app_state.version != APP_STATE_VERSION {
+    if app_state.version != 1 && app_state.version != APP_STATE_VERSION {
         backup_corrupt_app_state(state_path);
         return PersistedAppState::default();
     }
 
+    app_state.version = APP_STATE_VERSION;
     for workspace in &mut app_state.open_workspaces {
         workspace.tile_state = sanitize_tile_state(workspace.tile_state.clone());
     }
@@ -727,6 +754,8 @@ fn default_workspace_tile_state() -> WorkspaceTileState {
             id: format!("tile-{}", Uuid::new_v4()),
             kind: "terminal".to_string(),
             title: "Terminal".to_string(),
+            tool_id: None,
+            resume: None,
             initial_command: None,
             x: 0,
             y: 0,
@@ -744,25 +773,112 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
         if tile.id.trim().is_empty() || !ids.insert(tile.id.clone()) {
             continue;
         }
-        if tile.kind != "terminal" {
-            continue;
-        }
-        if tile.title.trim().is_empty() {
-            tile.title = "Terminal".to_string();
-        }
         if !is_valid_tile_geometry(&tile) {
             continue;
         }
         if tiles.iter().any(|existing| tiles_overlap(existing, &tile)) {
             continue;
         }
-        tiles.push(tile);
+
+        tile.resume = sanitize_resume_metadata(tile.resume);
+        let legacy_initial_command = tile.initial_command.take();
+
+        if tile.kind == "terminal" {
+            if let Some(tool_id) =
+                recognized_legacy_initial_command(legacy_initial_command.as_deref())
+            {
+                tile.kind = "tool".to_string();
+                tile.tool_id = Some(tool_id.to_string());
+            } else {
+                tile.tool_id = None;
+            }
+        }
+
+        if tile.kind == "terminal" {
+            if tile.title.trim().is_empty() {
+                tile.title = "Terminal".to_string();
+            }
+            tiles.push(tile);
+            continue;
+        }
+
+        if tile.kind == "tool" {
+            let Some(tool_id) = tile
+                .tool_id
+                .as_deref()
+                .filter(|tool_id| is_known_tool(tool_id))
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            if tile.title.trim().is_empty() {
+                tile.title = tool_title(&tool_id).to_string();
+            }
+            tiles.push(tile);
+        }
     }
 
     if tiles.is_empty() {
         default_workspace_tile_state()
     } else {
         WorkspaceTileState { tiles }
+    }
+}
+
+fn sanitize_resume_metadata(resume: Option<TileResumeMetadata>) -> Option<TileResumeMetadata> {
+    let resume = resume?;
+    if !is_valid_resume_provider(&resume.provider) {
+        return None;
+    }
+    if !is_valid_resume_identifier(&resume.identifier) {
+        return None;
+    }
+    Some(resume)
+}
+
+fn is_valid_resume_provider(provider: &str) -> bool {
+    !provider.is_empty()
+        && provider.len() <= 64
+        && provider.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || byte == b'-'
+                || byte == b'_'
+                || byte == b'.'
+        })
+}
+
+fn is_valid_resume_identifier(identifier: &str) -> bool {
+    !identifier.is_empty()
+        && identifier.len() <= 512
+        && !identifier.contains('\0')
+        && !identifier.contains('\n')
+        && !identifier.contains('\r')
+}
+
+fn recognized_legacy_initial_command(command: Option<&str>) -> Option<&'static str> {
+    match command {
+        Some("claude") => Some("claude"),
+        Some("codex") => Some("codex"),
+        Some("gemini") => Some("gemini"),
+        Some("opencode") => Some("opencode"),
+        Some("pi") => Some("pi"),
+        _ => None,
+    }
+}
+
+fn is_known_tool(tool_id: &str) -> bool {
+    matches!(tool_id, "claude" | "codex" | "gemini" | "opencode" | "pi")
+}
+
+fn tool_title(tool_id: &str) -> &'static str {
+    match tool_id {
+        "claude" => "Claude",
+        "codex" => "Codex",
+        "gemini" => "Gemini",
+        "opencode" => "OpenCode",
+        "pi" => "Pi",
+        _ => "Tool",
     }
 }
 
@@ -862,6 +978,121 @@ fn git_output(root: &str, args: &[&str]) -> Option<String> {
     }
 }
 
+struct TerminalLaunchPlan {
+    shell_command: Option<String>,
+    assigned_resume: Option<TileResumeMetadata>,
+}
+
+fn terminal_launch_plan(launch: &TerminalLaunchRequest) -> Result<TerminalLaunchPlan, String> {
+    if launch.kind != "tool" {
+        return Ok(TerminalLaunchPlan {
+            shell_command: None,
+            assigned_resume: None,
+        });
+    }
+
+    let tool_id = launch
+        .tool_id
+        .as_deref()
+        .filter(|tool_id| is_known_tool(tool_id))
+        .ok_or_else(|| "unsupported tool tile".to_string())?;
+    let existing_resume = launch
+        .resume
+        .clone()
+        .and_then(|resume| sanitize_resume_metadata(Some(resume)));
+
+    if let Some(resume) = existing_resume.filter(|resume| resume.provider == tool_id) {
+        return Ok(TerminalLaunchPlan {
+            shell_command: Some(resume_tool_shell_command(tool_id, &resume)),
+            assigned_resume: None,
+        });
+    }
+
+    if launch.resume.is_none() {
+        if let Some(resume) = new_preassigned_resume(tool_id) {
+            return Ok(TerminalLaunchPlan {
+                shell_command: Some(new_tool_shell_command(tool_id, &resume)),
+                assigned_resume: Some(resume),
+            });
+        }
+    }
+
+    Ok(TerminalLaunchPlan {
+        shell_command: Some(shell_command_from_args(vec![tool_id.to_string()])),
+        assigned_resume: None,
+    })
+}
+
+fn terminal_command(shell: &str, cwd: PathBuf, launch_plan: &TerminalLaunchPlan) -> CommandBuilder {
+    let mut command = CommandBuilder::new(shell);
+    command.cwd(cwd);
+
+    if let Some(shell_command) = &launch_plan.shell_command {
+        command.arg("-lc");
+        command.arg(shell_command);
+    }
+
+    command
+}
+
+fn new_preassigned_resume(tool_id: &str) -> Option<TileResumeMetadata> {
+    if !matches!(tool_id, "claude" | "gemini" | "pi") {
+        return None;
+    }
+
+    Some(TileResumeMetadata {
+        provider: tool_id.to_string(),
+        identifier: Uuid::new_v4().to_string(),
+    })
+}
+
+fn new_tool_shell_command(tool_id: &str, resume: &TileResumeMetadata) -> String {
+    let mut args = vec![tool_id.to_string()];
+
+    match tool_id {
+        "claude" | "gemini" | "pi" => {
+            args.push("--session-id".to_string());
+            args.push(resume.identifier.clone());
+        }
+        _ => {}
+    }
+
+    shell_command_from_args(args)
+}
+
+fn resume_tool_shell_command(tool_id: &str, resume: &TileResumeMetadata) -> String {
+    let mut args = vec![tool_id.to_string()];
+
+    match tool_id {
+        "claude" | "gemini" => {
+            args.push("--resume".to_string());
+            args.push(resume.identifier.clone());
+        }
+        "codex" => {
+            args.push("resume".to_string());
+            args.push(resume.identifier.clone());
+        }
+        "opencode" | "pi" => {
+            args.push("--session".to_string());
+            args.push(resume.identifier.clone());
+        }
+        _ => {}
+    }
+
+    shell_command_from_args(args)
+}
+
+fn shell_command_from_args(args: Vec<String>) -> String {
+    args.iter()
+        .map(|arg| shell_escape_arg(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_escape_arg(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "'\\''"))
+}
+
 fn normalize_cwd(workspace_state: &WorkspaceState, cwd: &str) -> Result<PathBuf, String> {
     let workspace_root = workspace_state.current_workspace_root()?;
     let workspace_root = PathBuf::from(workspace_root)
@@ -947,6 +1178,143 @@ fn now_unix_seconds() -> u64 {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_launch_plan_assigns_resume_for_preassignable_tools() {
+        for tool_id in ["claude", "gemini", "pi"] {
+            let plan = terminal_launch_plan(&tool_launch(tool_id, None)).unwrap();
+            let assigned_resume = plan.assigned_resume.as_ref().unwrap();
+
+            assert_eq!(assigned_resume.provider, tool_id);
+            assert!(is_valid_resume_identifier(&assigned_resume.identifier));
+            assert_eq!(
+                plan.shell_command,
+                Some(format!(
+                    "'{}' '--session-id' '{}'",
+                    tool_id, assigned_resume.identifier
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_launch_plan_applies_provider_resume_mechanics() {
+        assert_eq!(
+            terminal_launch_plan(&tool_launch("claude", Some(resume("claude", "abc-123"))))
+                .unwrap()
+                .shell_command,
+            Some("'claude' '--resume' 'abc-123'".to_string())
+        );
+        assert_eq!(
+            terminal_launch_plan(&tool_launch("codex", Some(resume("codex", "thread name"))))
+                .unwrap()
+                .shell_command,
+            Some("'codex' 'resume' 'thread name'".to_string())
+        );
+        assert_eq!(
+            terminal_launch_plan(&tool_launch("gemini", Some(resume("gemini", "session-1"))))
+                .unwrap()
+                .shell_command,
+            Some("'gemini' '--resume' 'session-1'".to_string())
+        );
+        assert_eq!(
+            terminal_launch_plan(&tool_launch(
+                "opencode",
+                Some(resume("opencode", "session-1")),
+            ))
+            .unwrap()
+            .shell_command,
+            Some("'opencode' '--session' 'session-1'".to_string())
+        );
+        assert_eq!(
+            terminal_launch_plan(&tool_launch("pi", Some(resume("pi", "session-1"))))
+                .unwrap()
+                .shell_command,
+            Some("'pi' '--session' 'session-1'".to_string())
+        );
+    }
+
+    #[test]
+    fn terminal_launch_plan_falls_back_to_fresh_launch_for_mismatched_resume() {
+        let plan =
+            terminal_launch_plan(&tool_launch("claude", Some(resume("pi", "session-1")))).unwrap();
+
+        assert_eq!(plan.shell_command, Some("'claude'".to_string()));
+        assert!(plan.assigned_resume.is_none());
+    }
+
+    #[test]
+    fn terminal_launch_plan_does_not_preassign_capture_only_tools() {
+        for tool_id in ["codex", "opencode"] {
+            let plan = terminal_launch_plan(&tool_launch(tool_id, None)).unwrap();
+
+            assert_eq!(plan.shell_command, Some(format!("'{}'", tool_id)));
+            assert!(plan.assigned_resume.is_none());
+        }
+    }
+
+    #[test]
+    fn sanitize_tile_state_migrates_known_initial_commands_to_tool_tiles() {
+        let tile_state = WorkspaceTileState {
+            tiles: vec![tile_with_initial_command("claude")],
+        };
+
+        let sanitized = sanitize_tile_state(tile_state);
+
+        assert_eq!(sanitized.tiles.len(), 1);
+        assert_eq!(sanitized.tiles[0].kind, "tool");
+        assert_eq!(sanitized.tiles[0].tool_id.as_deref(), Some("claude"));
+        assert!(sanitized.tiles[0].initial_command.is_none());
+    }
+
+    #[test]
+    fn sanitize_tile_state_discards_unknown_initial_commands() {
+        let tile_state = WorkspaceTileState {
+            tiles: vec![tile_with_initial_command("custom")],
+        };
+
+        let sanitized = sanitize_tile_state(tile_state);
+
+        assert_eq!(sanitized.tiles.len(), 1);
+        assert_eq!(sanitized.tiles[0].kind, "terminal");
+        assert!(sanitized.tiles[0].tool_id.is_none());
+        assert!(sanitized.tiles[0].initial_command.is_none());
+    }
+
+    fn resume(provider: &str, identifier: &str) -> TileResumeMetadata {
+        TileResumeMetadata {
+            provider: provider.to_string(),
+            identifier: identifier.to_string(),
+        }
+    }
+
+    fn tool_launch(tool_id: &str, resume: Option<TileResumeMetadata>) -> TerminalLaunchRequest {
+        TerminalLaunchRequest {
+            kind: "tool".to_string(),
+            tool_id: Some(tool_id.to_string()),
+            resume,
+        }
+    }
+
+    fn tile_with_initial_command(initial_command: &str) -> PersistedTile {
+        PersistedTile {
+            id: "tile-test".to_string(),
+            kind: "terminal".to_string(),
+            title: "Test".to_string(),
+            tool_id: None,
+            resume: None,
+            initial_command: Some(initial_command.to_string()),
+            x: 0,
+            y: 0,
+            w: MIN_TILE_WIDTH,
+            h: MIN_TILE_HEIGHT,
+        }
+    }
 }
 
 fn lock_error<T>(error: std::sync::PoisonError<T>) -> String {

@@ -4,66 +4,80 @@ import geminiLogoUrl from "./assets/gemini-logo.svg";
 import openAiLogoUrl from "./assets/openai-logo.svg";
 import opencodeLogoUrl from "./assets/opencode-logo.svg";
 import piLogoUrl from "./assets/pi-logo.svg";
+import type { Tile } from "./types";
 
-export interface TilePickerCatalogItem {
-  id: string;
-  title: string;
-  icon: ReactNode;
-  initialCommand?: string;
-}
+export type TilePickerCatalogItem =
+  | {
+      id: string;
+      kind: "terminal";
+      title: string;
+      icon: ReactNode;
+    }
+  | {
+      id: string;
+      kind: "tool";
+      title: string;
+      icon: ReactNode;
+      toolId: string;
+    };
 
-interface ConfigurableTilePickerCatalogItem extends TilePickerCatalogItem {
+type ConfigurableTilePickerCatalogItem = TilePickerCatalogItem & {
   defaultVisible: boolean;
-}
+};
 
 const terminalTilePickerItem = {
   id: "terminal",
+  kind: "terminal",
   title: "Terminal",
   icon: <span>&gt;_</span>,
-  initialCommand: undefined,
   defaultVisible: true,
 } as const satisfies ConfigurableTilePickerCatalogItem;
 
 export const configurableTilePickerItems = [
   {
     id: "claude",
+    kind: "tool",
     title: "Claude",
     icon: (
       <img className="picker-option-logo picker-option-logo-plain" src={claudeLogoUrl} alt="" />
     ),
-    initialCommand: "claude",
+    toolId: "claude",
     defaultVisible: false,
   },
   {
     id: "codex",
+    kind: "tool",
     title: "Codex",
     icon: (
       <img className="picker-option-logo picker-option-logo-openai" src={openAiLogoUrl} alt="" />
     ),
-    initialCommand: "codex",
+    toolId: "codex",
     defaultVisible: false,
   },
   {
     id: "gemini",
+    kind: "tool",
     title: "Gemini",
     icon: (
       <img className="picker-option-logo picker-option-logo-plain" src={geminiLogoUrl} alt="" />
     ),
-    initialCommand: "gemini",
+    toolId: "gemini",
     defaultVisible: false,
   },
   {
     id: "opencode",
+    kind: "tool",
     title: "OpenCode",
     icon: <img className="picker-option-logo" src={opencodeLogoUrl} alt="" />,
-    initialCommand: "opencode",
+    toolId: "opencode",
     defaultVisible: false,
   },
   {
     id: "pi",
+    kind: "tool",
     title: "Pi",
     icon: <img className="picker-option-logo" src={piLogoUrl} alt="" />,
-    initialCommand: "pi",
+    toolId: "pi",
     defaultVisible: false,
   },
   terminalTilePickerItem,
@@ -86,14 +100,12 @@ export function findTilePickerItem(itemId: string): TilePickerCatalogItem | unde
   return configurableTilePickerItems.find((item) => item.id === itemId);
 }
 
-export function findTilePickerItemForTile(tile: {
-  title: string;
-  initialCommand?: string;
-}): TilePickerCatalogItem {
-  if (!tile.initialCommand) return terminalTilePickerItem;
+export function findTilePickerItemForTile(tile: Tile): TilePickerCatalogItem {
+  if (tile.kind === "terminal") return terminalTilePickerItem;
 
   return (
-    configurableTilePickerItems.find((item) => item.initialCommand === tile.initialCommand) ??
-    terminalTilePickerItem
+    configurableTilePickerItems.find(
+      (item) => item.kind === "tool" && item.toolId === tile.toolId,
+    ) ?? terminalTilePickerItem
   );
 }

@@ -138,39 +138,37 @@ export function resizeTile(
 
 export type TileSplitDirection = Extract<Direction, "right" | "down">;
 
+type NewTileOptions =
+  | { kind: "terminal"; title: string }
+  | { kind: "tool"; title: string; toolId: string };
+
+const defaultNewTileOptions = { kind: "terminal", title: "Terminal" } as const;
+
 export function splitFocusedTile(
   tiles: Tile[],
   focusedTileId: string | null,
-  newTileOptions: Pick<Tile, "title"> & Partial<Pick<Tile, "initialCommand">> = {
-    title: "Terminal",
-  },
+  newTileOptions: NewTileOptions = defaultNewTileOptions,
   direction?: TileSplitDirection,
 ): { tiles: Tile[]; focusedTileId: string | null } {
   const focused = findTile(tiles, focusedTileId);
   if (!focused) return { tiles, focusedTileId };
 
-  const splitTileOptions = {
-    kind: "terminal" as const,
-    title: newTileOptions.title,
-    initialCommand: newTileOptions.initialCommand,
-  };
-
   if (direction === "right") {
-    if (focused.w >= MIN_TILE_WIDTH * 2) return splitTileRight(tiles, focused, splitTileOptions);
+    if (focused.w >= MIN_TILE_WIDTH * 2) return splitTileRight(tiles, focused, newTileOptions);
     return { tiles, focusedTileId };
   }
 
   if (direction === "down") {
-    if (focused.h >= MIN_TILE_HEIGHT * 2) return splitTileDown(tiles, focused, splitTileOptions);
+    if (focused.h >= MIN_TILE_HEIGHT * 2) return splitTileDown(tiles, focused, newTileOptions);
     return { tiles, focusedTileId };
   }
 
   if (focused.w >= MIN_TILE_WIDTH * 2) {
-    return splitTileRight(tiles, focused, splitTileOptions);
+    return splitTileRight(tiles, focused, newTileOptions);
   }
 
   if (focused.h >= MIN_TILE_HEIGHT * 2) {
-    return splitTileDown(tiles, focused, splitTileOptions);
+    return splitTileDown(tiles, focused, newTileOptions);
   }
 
   return { tiles, focusedTileId };
@@ -184,11 +182,10 @@ export function splitFocusedTileInDirection(
   const focused = findTile(tiles, focusedTileId);
   if (!focused) return { tiles, focusedTileId };
 
-  const newTileOptions = {
-    kind: focused.kind,
-    title: focused.title,
-    initialCommand: focused.initialCommand,
-  };
+  const newTileOptions: NewTileOptions =
+    focused.kind === "tool"
+      ? { kind: "tool", title: focused.title, toolId: focused.toolId }
+      : { kind: "terminal", title: focused.title };
 
   if (direction === "right" && focused.w >= MIN_TILE_WIDTH * 2) {
     return splitTileRight(tiles, focused, newTileOptions);
@@ -201,23 +198,36 @@ export function splitFocusedTileInDirection(
   return { tiles, focusedTileId };
 }
 
+function createTileFromOptions(
+  options: NewTileOptions,
+  geometry: Pick<Tile, "x" | "y" | "w" | "h">,
+): Tile {
+  const base = {
+    id: createTileId(),
+    title: options.title,
+    ...geometry,
+  };
+
+  if (options.kind === "tool") {
+    return { ...base, kind: "tool", toolId: options.toolId };
+  }
+
+  return { ...base, kind: "terminal" };
+}
+
 function splitTileRight(
   tiles: Tile[],
   focused: Tile,
-  newTileOptions: Pick<Tile, "kind" | "title"> & Partial<Pick<Tile, "initialCommand">>,
+  newTileOptions: NewTileOptions,
 ): { tiles: Tile[]; focusedTileId: string | null } {
   const leftWidth = Math.floor(focused.w / 2);
   const rightWidth = focused.w - leftWidth;
-  const newTile: Tile = {
-    id: createTileId(),
-    kind: newTileOptions.kind,
-    title: newTileOptions.title,
-    initialCommand: newTileOptions.initialCommand,
+  const newTile: Tile = createTileFromOptions(newTileOptions, {
     x: focused.x + leftWidth,
     y: focused.y,
     w: rightWidth,
     h: focused.h,
-  };
+  });
   const updatedFocused = { ...focused, w: leftWidth };
   return {
     tiles: tiles.map((tile) => (tile.id === focused.id ? updatedFocused : tile)).concat(newTile),
@@ -228,20 +238,16 @@ function splitTileRight(
 function splitTileDown(
   tiles: Tile[],
   focused: Tile,
-  newTileOptions: Pick<Tile, "kind" | "title"> & Partial<Pick<Tile, "initialCommand">>,
+  newTileOptions: NewTileOptions,
 ): { tiles: Tile[]; focusedTileId: string | null } {
   const topHeight = Math.floor(focused.h / 2);
   const bottomHeight = focused.h - topHeight;
-  const newTile: Tile = {
-    id: createTileId(),
-    kind: newTileOptions.kind,
-    title: newTileOptions.title,
-    initialCommand: newTileOptions.initialCommand,
+  const newTile: Tile = createTileFromOptions(newTileOptions, {
     x: focused.x,
     y: focused.y + topHeight,
     w: focused.w,
     h: bottomHeight,
-  };
+  });
   const updatedFocused = { ...focused, h: topHeight };
   return {
     tiles: tiles.map((tile) => (tile.id === focused.id ? updatedFocused : tile)).concat(newTile),

@@ -25,7 +25,9 @@ import {
 import {
   GRID_COLUMNS,
   GRID_ROWS,
+  type TerminalLaunch,
   type Tile,
+  type TileResumeMetadata,
   type WorkspaceContext,
   type WorkspaceTileState,
 } from "./types";
@@ -51,6 +53,14 @@ function createLayoutFromTiles(tiles: Tile[]): LayoutState {
     focusedTileId: tiles[0]?.id ?? null,
     focusModeTileId: null,
   };
+}
+
+function terminalLaunchForTile(tile: Tile): TerminalLaunch {
+  if (tile.kind === "tool") {
+    return { kind: "tool", toolId: tile.toolId, resume: tile.resume };
+  }
+
+  return { kind: "shell" };
 }
 
 export function App() {
@@ -286,18 +296,16 @@ export function App() {
     }));
   };
 
-  const createTerminalTile = (
-    title = "Terminal",
-    initialCommand?: string,
+  const createTile = (
+    tileOptions:
+      | { kind: "terminal"; title: string }
+      | { kind: "tool"; title: string; toolId: string },
     splitDirection?: TileSplitDirection,
   ) => {
     const result = splitFocusedTile(
       layoutRef.current.tiles,
       layoutRef.current.focusedTileId,
-      {
-        title,
-        initialCommand,
-      },
+      tileOptions,
       splitDirection,
     );
     setLayout((previous) => ({
@@ -307,6 +315,28 @@ export function App() {
     }));
     setTilePickerOpen(false);
   };
+
+  const assignTileResume = useCallback((tileId: string, resume: TileResumeMetadata) => {
+    setLayout((previous) => {
+      const tile = previous.tiles.find((candidate) => candidate.id === tileId);
+      if (!tile || tile.kind !== "tool") return previous;
+      if (
+        tile.resume?.provider === resume.provider &&
+        tile.resume.identifier === resume.identifier
+      ) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        tiles: previous.tiles.map((candidate) =>
+          candidate.id === tileId && candidate.kind === "tool"
+            ? { ...candidate, resume }
+            : candidate,
+        ),
+      };
+    });
+  }, []);
 
   const tilePickerItems = useMemo<PickerItem[]>(
     () => getTilePickerItems(tilePickerVisibility),
@@ -400,8 +430,9 @@ export function App() {
                         tileId={tile.id}
                         cwd={workspaceRoot}
                         active={focused}
-                        initialCommand={tile.initialCommand}
+                        launch={terminalLaunchForTile(tile)}
                         terminalFontSize={terminalFontSize}
+                        onResumeAssigned={(resume) => assignTileResume(tile.id, resume)}
                       />
                     ) : (
                       <div className="tile-placeholder">Loading workspace…</div>
@@ -447,9 +478,10 @@ export function App() {
           onSelect={(item: PickerItem, options) => {
             const catalogItem = findTilePickerItem(item.id);
             if (!catalogItem) return;
-            createTerminalTile(
-              catalogItem.title,
-              catalogItem.initialCommand,
+            createTile(
+              catalogItem.kind === "tool"
+                ? { kind: "tool", title: catalogItem.title, toolId: catalogItem.toolId }
+                : { kind: "terminal", title: catalogItem.title },
               options.splitDirection,
             );
           }}

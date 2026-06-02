@@ -5,18 +5,34 @@ export const MIN_TILE_HEIGHT = 2;
 
 export type Direction = "left" | "down" | "up" | "right";
 
-export type TileKind = "terminal";
+export type TileKind = "terminal" | "tool";
 
-export interface Tile {
+export interface TileResumeMetadata {
+  provider: string;
+  identifier: string;
+}
+
+interface BaseTile {
   id: string;
   kind: TileKind;
   title: string;
-  initialCommand?: string;
+  resume?: TileResumeMetadata;
   x: number;
   y: number;
   w: number;
   h: number;
 }
+
+export interface TerminalWorkspaceTile extends BaseTile {
+  kind: "terminal";
+}
+
+export interface ToolWorkspaceTile extends BaseTile {
+  kind: "tool";
+  toolId: string;
+}
+
+export type Tile = TerminalWorkspaceTile | ToolWorkspaceTile;
 
 export type ProjectKind = "git" | "plain";
 
@@ -66,15 +82,21 @@ export interface WorkspaceTileStateSaveRequest {
   tileState: WorkspaceTileState;
 }
 
+export type TerminalLaunch =
+  | { kind: "shell" }
+  | { kind: "tool"; toolId: string; resume?: TileResumeMetadata };
+
 export interface TerminalCreateRequest {
   tileId: string;
   cwd: string;
   cols: number;
   rows: number;
+  launch: TerminalLaunch;
 }
 
 export interface TerminalCreateResponse {
   sessionId: string;
+  assignedResume?: TileResumeMetadata;
 }
 
 export interface TerminalWriteRequest {

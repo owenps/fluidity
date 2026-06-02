@@ -11,13 +11,15 @@ import {
   resizeTerminalSession,
   writeTerminalInput,
 } from "./terminalClient";
+import type { TerminalLaunch, TileResumeMetadata } from "./types";
 
 interface TerminalTileProps {
   tileId: string;
   cwd: string;
   active: boolean;
   terminalFontSize: number;
-  initialCommand?: string;
+  launch: TerminalLaunch;
+  onResumeAssigned: (resume: TileResumeMetadata) => void;
 }
 
 export function TerminalTile({
@@ -25,12 +27,18 @@ export function TerminalTile({
   cwd,
   active,
   terminalFontSize,
-  initialCommand,
+  launch,
+  onResumeAssigned,
 }: TerminalTileProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const onResumeAssignedRef = useRef(onResumeAssigned);
+
+  useEffect(() => {
+    onResumeAssignedRef.current = onResumeAssigned;
+  }, [onResumeAssigned]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -118,15 +126,16 @@ export function TerminalTile({
       cwd,
       cols: dimensions?.cols ?? 80,
       rows: dimensions?.rows ?? 24,
+      launch,
     })
-      .then(({ sessionId }) => {
+      .then(({ sessionId, assignedResume }) => {
         if (disposed) {
           void closeTerminalSession({ sessionId });
           return;
         }
         sessionIdRef.current = sessionId;
-        if (initialCommand) {
-          void writeTerminalInput({ sessionId, data: `${initialCommand}\r` });
+        if (assignedResume) {
+          onResumeAssignedRef.current(assignedResume);
         }
       })
       .catch((error) => {
@@ -164,7 +173,7 @@ export function TerminalTile({
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [cwd, initialCommand, tileId]);
+  }, [cwd, launch.kind, launch.kind === "tool" ? launch.toolId : undefined, tileId]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

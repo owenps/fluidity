@@ -41,8 +41,16 @@ A movable and resizable object inside a workspace, focused on one kind of work s
 _Avoid_: Pane, panel, widget
 
 **Workspace Tile State**:
-The restorable tile collection for an open workspace, including tile definitions and tile geometry, but excluding transient focus, fullscreen, and live tile runtime state.
+The restorable tile collection for an open workspace, including tile definitions, tile geometry, and Tile Resume Metadata, but excluding transient focus, fullscreen, and live tile runtime state.
 _Avoid_: Layout, arrangement, tile session
+
+**Tile Resume Metadata**:
+Durable, tile-kind-specific information stored with a tile definition so the tile can reconnect to or resume an external experience without preserving the live runtime itself.
+_Avoid_: Runtime state, session state, terminal state
+
+**Tool Resume Provider**:
+A known way for Smithing to turn Tile Resume Metadata into launch or resume behavior for a Tool Tile.
+_Avoid_: Backend, resumable backend, session manager
 
 **Workspace Grid**:
 The fixed-cell surface inside a workspace where tiles are placed without overlap.
@@ -59,6 +67,10 @@ _Avoid_: Tab bar, workspace tabs, active workspace list
 **Terminal Tile**:
 A tile containing an interactive shell session for a workspace that should feel like opening a normal macOS terminal in that workspace.
 _Avoid_: Command runner, output panel, console
+
+**Tool Tile**:
+A tile centered on an external development tool or long-running tool experience, such as an agent or third-party development tool.
+_Avoid_: Command Tile, Agent Tile, third-party tile, command runner
 
 **Arrangement**:
 A reusable template that defines the default collection and layout of tiles for new workspaces in a project.
