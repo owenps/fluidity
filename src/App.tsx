@@ -6,6 +6,7 @@ import { Picker, type PickerItem } from "./Picker";
 import { APP_NAME } from "./appConstants";
 import { resetApplication } from "./applicationClient";
 import { SettingsModal } from "./SettingsModal";
+import { listToolAvailabilities } from "./integrationClient";
 import { addProject, listProjects, removeProject } from "./projectClient";
 import {
   clearAppSettings,
@@ -30,6 +31,7 @@ import {
   type TerminalLaunch,
   type Tile,
   type TileResumeMetadata,
+  type ToolAvailability,
   type WorkspaceContext,
   type WorkspaceTileState,
 } from "./types";
@@ -87,6 +89,8 @@ export function App() {
   const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [toasts, setToasts] = useState<AppToast[]>([]);
+  const [toolAvailabilities, setToolAvailabilities] = useState<ToolAvailability[]>([]);
+  const [toolAvailabilityLoaded, setToolAvailabilityLoaded] = useState(false);
   const [settings, setSettings] = useState(() => readAppSettings(import.meta.env.DEV));
   const { debugLayout, terminalFontSize, tileHeadersVisible, tilePickerVisibility } = settings;
   const layoutRef = useRef(layout);
@@ -203,6 +207,40 @@ export function App() {
   useEffect(() => {
     refreshProjects();
   }, [refreshProjects]);
+
+  const refreshToolAvailabilities = useCallback(() => {
+    setToolAvailabilityLoaded(false);
+    void listToolAvailabilities()
+      .then((availabilities) => {
+        setToolAvailabilities(availabilities);
+        setToolAvailabilityLoaded(true);
+      })
+      .catch(() => {
+        setToolAvailabilities([]);
+        setToolAvailabilityLoaded(true);
+      });
+  }, []);
+
+  useEffect(() => {
+    refreshToolAvailabilities();
+  }, [refreshToolAvailabilities]);
+
+  useEffect(() => {
+    if (tilePickerOpen || settingsOpen) {
+      refreshToolAvailabilities();
+    }
+  }, [refreshToolAvailabilities, settingsOpen, tilePickerOpen]);
+
+  const toolAvailabilityByPickerItemId = useMemo(
+    () =>
+      new Map(
+        toolAvailabilities.map((availability) => [
+          `${availability.integrationId}.${availability.integrationTileId}`,
+          availability,
+        ]),
+      ),
+    [toolAvailabilities],
+  );
 
   const runAddProject = useCallback(() => {
     void addProject()
@@ -477,8 +515,28 @@ export function App() {
   }, []);
 
   const tilePickerItems = useMemo<PickerItem[]>(
-    () => getTilePickerItems(tilePickerVisibility),
-    [tilePickerVisibility],
+    () =>
+      getTilePickerItems(tilePickerVisibility).map((item) => {
+        if (item.kind !== "tool") return item;
+
+        const availability = toolAvailabilityByPickerItemId.get(item.id);
+        if (!toolAvailabilityLoaded) {
+          return { ...item, disabled: true, detail: "Checking availability…" };
+        }
+        if (availability?.status === "available") {
+          return { ...item, detail: availability.resolvedPath };
+        }
+        if (availability?.status === "unavailable") {
+          return {
+            ...item,
+            disabled: true,
+            detail: "Not installed",
+          };
+        }
+
+        return { ...item, disabled: true, detail: "Availability unknown" };
+      }),
+    [tilePickerVisibility, toolAvailabilityByPickerItemId, toolAvailabilityLoaded],
   );
   const workspacePickerItems = useMemo<PickerItem[]>(() => {
     const projects = [...registeredProjects].sort((left, right) => {
@@ -629,7 +687,10 @@ export function App() {
           tileHeadersVisible={tileHeadersVisible}
           onTileHeadersVisibleChange={setTileHeadersVisibleSetting}
           tilePickerVisibility={tilePickerVisibility}
+          toolAvailabilityByPickerItemId={toolAvailabilityByPickerItemId}
+          toolAvailabilityLoaded={toolAvailabilityLoaded}
           onTilePickerVisibilityChange={setTilePickerItemVisibility}
+          onRefreshToolAvailabilities={refreshToolAvailabilities}
           projects={registeredProjects}
           projectsLoaded={projectsLoaded}
           currentProjectRoot={context?.project.root ?? null}

@@ -5,7 +5,7 @@ import { Slider } from "./Slider";
 import { TilePickerSettings } from "./TilePickerSettings";
 import { Toggle } from "./Toggle";
 import type { ConfigurableTilePickerItemId, TilePickerVisibility } from "./tilePickerCatalog";
-import type { RegisteredProject } from "./types";
+import type { RegisteredProject, ToolAvailability } from "./types";
 
 const terminalFontSizeMin = 10;
 const terminalFontSizeMax = 24;
@@ -36,7 +36,10 @@ interface SettingsModalProps {
   tileHeadersVisible: boolean;
   onTileHeadersVisibleChange: (visible: boolean) => void;
   tilePickerVisibility: TilePickerVisibility;
+  toolAvailabilityByPickerItemId: Map<string, ToolAvailability>;
+  toolAvailabilityLoaded: boolean;
   onTilePickerVisibilityChange: (itemId: ConfigurableTilePickerItemId, visible: boolean) => void;
+  onRefreshToolAvailabilities: () => void;
   projects: RegisteredProject[];
   projectsLoaded: boolean;
   currentProjectRoot: string | null;
@@ -54,7 +57,10 @@ export function SettingsModal({
   tileHeadersVisible,
   onTileHeadersVisibleChange,
   tilePickerVisibility,
+  toolAvailabilityByPickerItemId,
+  toolAvailabilityLoaded,
   onTilePickerVisibilityChange,
+  onRefreshToolAvailabilities,
   projects,
   projectsLoaded,
   currentProjectRoot,
@@ -257,7 +263,7 @@ export function SettingsModal({
           }
           if (event.key === "Enter") {
             const interactiveTarget = (event.target as HTMLElement).closest(
-              ".settings-close-button, .settings-project-remove-button, .settings-project-refresh-button",
+              ".settings-close-button, .settings-project-remove-button, .settings-project-refresh-button, .settings-integration-refresh-button",
             );
             if (!interactiveTarget) {
               event.preventDefault();
@@ -327,9 +333,12 @@ export function SettingsModal({
             active={activeItemId === "tile-picker"}
             open={tilePickerSettingsOpen}
             visibility={tilePickerVisibility}
+            toolAvailabilityByPickerItemId={toolAvailabilityByPickerItemId}
+            toolAvailabilityLoaded={toolAvailabilityLoaded}
             onActive={() => setActiveItemId("tile-picker")}
             onOpenChange={changeTilePickerSettingsOpen}
             onVisibilityChange={onTilePickerVisibilityChange}
+            onRefreshToolAvailabilities={onRefreshToolAvailabilities}
           />
           <div className="settings-section">
             <button

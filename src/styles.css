@@ -764,6 +764,12 @@ body {
   background: transparent;
 }
 
+.picker-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
 .picker-option-title {
   min-width: 0;
   overflow: hidden;
@@ -771,6 +777,21 @@ body {
   font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.picker-option-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-option:disabled .picker-option-title,
+.picker-option:disabled .picker-option-icon {
+  color: var(--muted-foreground);
 }
 
 .picker-empty {
@@ -984,7 +1005,8 @@ body {
   font-size: 12px;
 }
 
-.settings-projects-header {
+.settings-projects-header,
+.settings-integrations-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -992,6 +1014,7 @@ body {
 }
 
 .settings-project-refresh-button,
+.settings-integration-refresh-button,
 .settings-project-remove-button {
   flex: 0 0 auto;
   min-height: 28px;
@@ -1006,6 +1029,8 @@ body {
 
 .settings-project-refresh-button:hover,
 .settings-project-refresh-button:focus-visible,
+.settings-integration-refresh-button:hover,
+.settings-integration-refresh-button:focus-visible,
 .settings-project-remove-button:hover,
 .settings-project-remove-button:focus-visible {
   outline: 1px solid var(--ring);

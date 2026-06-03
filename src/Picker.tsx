@@ -5,6 +5,7 @@ export interface PickerItem {
   id: string;
   title: string;
   icon: ReactNode;
+  detail?: ReactNode;
   disabled?: boolean;
 }
 
@@ -115,7 +116,10 @@ export function Picker({ title, items, footer, onSelect, onClose }: PickerProps)
                 <span className="picker-option-icon" aria-hidden="true">
                   {item.icon}
                 </span>
-                <span className="picker-option-title">{item.title}</span>
+                <span className="picker-option-copy">
+                  <span className="picker-option-title">{item.title}</span>
+                  {item.detail ? <span className="picker-option-detail">{item.detail}</span> : null}
+                </span>
               </button>
             );
           })}

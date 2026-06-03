@@ -234,6 +234,28 @@ struct ToolIntegrationTile {
     resume_provider: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ToolAvailabilityStatus {
+    Available,
+    Unavailable,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolAvailabilityResponse {
+    integration_id: String,
+    integration_tile_id: String,
+    title: String,
+    command: String,
+    status: ToolAvailabilityStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolved_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CurrentWorkspaceResponse {
@@ -500,7 +522,12 @@ fn terminal_create(
 ) -> Result<TerminalCreateResponse, String> {
     let cwd = normalize_cwd(&workspace_state, &request.cwd)?;
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let launch_plan = terminal_launch_plan(&request.launch)?;
+    let tool_tile = tool_integration_tile_for_launch(&request.launch)?;
+    if let Some(tool_tile) = &tool_tile {
+        ensure_tool_available(&shell, tool_tile)?;
+    }
+
+    let launch_plan = terminal_launch_plan_for_resolved_tool(&request.launch, tool_tile.as_ref())?;
     let response = terminal_state.create(
         app,
         TerminalSessionCreateRequest {
@@ -517,6 +544,15 @@ fn terminal_create(
         session_id: response.session_id,
         assigned_resume: launch_plan.assigned_resume,
     })
+}
+
+#[tauri::command]
+fn integration_tool_availability_list() -> Result<Vec<ToolAvailabilityResponse>, String> {
+    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    Ok(tool_integration_tiles()
+        .into_iter()
+        .map(|tile| tool_availability_for_tile(&shell, &tile))
+        .collect())
 }
 
 #[tauri::command]
@@ -567,6 +603,7 @@ pub fn run() {
             terminal_write,
             terminal_resize,
             terminal_close,
+            integration_tool_availability_list,
         ])
         .setup(|app| {
             app.manage(WorkspaceState::load(app.handle())?);
@@ -1043,21 +1080,33 @@ fn integration_catalog() -> IntegrationCatalog {
         .expect("integration catalog should be valid JSON")
 }
 
+fn tool_integration_tiles() -> Vec<ToolIntegrationTile> {
+    integration_catalog()
+        .integrations
+        .into_iter()
+        .flat_map(|integration| {
+            integration
+                .tiles
+                .into_iter()
+                .map(move |tile| (integration.id.clone(), tile))
+        })
+        .filter_map(|(integration_id, tile)| {
+            if tile.kind == "tool" {
+                tool_integration_tile_from_catalog(integration_id, tile)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn tool_integration_tile(
     integration_id: &str,
     integration_tile_id: &str,
 ) -> Option<ToolIntegrationTile> {
-    integration_catalog()
-        .integrations
-        .into_iter()
-        .find(|integration| integration.id == integration_id)
-        .and_then(|integration| {
-            integration
-                .tiles
-                .into_iter()
-                .find(|tile| tile.id == integration_tile_id && tile.kind == "tool")
-                .and_then(|tile| tool_integration_tile_from_catalog(integration.id, tile))
-        })
+    tool_integration_tiles().into_iter().find(|tile| {
+        tile.integration_id == integration_id && tile.integration_tile_id == integration_tile_id
+    })
 }
 
 fn tool_integration_tile_for_tile(tile: &PersistedTile) -> Option<ToolIntegrationTile> {
@@ -1099,6 +1148,74 @@ fn tool_integration_tile_from_catalog(
         resume_provider: tile.resume_provider.unwrap_or_else(|| tool_command.clone()),
         tool_command,
     })
+}
+
+fn tool_availability_for_tile(shell: &str, tile: &ToolIntegrationTile) -> ToolAvailabilityResponse {
+    let check_command = format!("command -v {}", shell_escape_arg(&tile.tool_command));
+    match Command::new(shell).arg("-lc").arg(check_command).output() {
+        Ok(output) => {
+            let resolved_path = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(str::to_string);
+
+            if output.status.success() && resolved_path.is_some() {
+                ToolAvailabilityResponse {
+                    integration_id: tile.integration_id.clone(),
+                    integration_tile_id: tile.integration_tile_id.clone(),
+                    title: tile.title.clone(),
+                    command: tile.tool_command.clone(),
+                    status: ToolAvailabilityStatus::Available,
+                    resolved_path,
+                    detail: None,
+                }
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                ToolAvailabilityResponse {
+                    integration_id: tile.integration_id.clone(),
+                    integration_tile_id: tile.integration_tile_id.clone(),
+                    title: tile.title.clone(),
+                    command: tile.tool_command.clone(),
+                    status: ToolAvailabilityStatus::Unavailable,
+                    resolved_path: None,
+                    detail: if stderr.is_empty() {
+                        None
+                    } else {
+                        Some(stderr)
+                    },
+                }
+            }
+        }
+        Err(error) => ToolAvailabilityResponse {
+            integration_id: tile.integration_id.clone(),
+            integration_tile_id: tile.integration_tile_id.clone(),
+            title: tile.title.clone(),
+            command: tile.tool_command.clone(),
+            status: ToolAvailabilityStatus::Unknown,
+            resolved_path: None,
+            detail: Some(error.to_string()),
+        },
+    }
+}
+
+fn ensure_tool_available(shell: &str, tile: &ToolIntegrationTile) -> Result<(), String> {
+    let availability = tool_availability_for_tile(shell, tile);
+    match availability.status {
+        ToolAvailabilityStatus::Available => Ok(()),
+        ToolAvailabilityStatus::Unavailable => Err(format!(
+            "{} CLI is not installed or is not on Fluidity's PATH. Install `{}` and try again.",
+            tile.title, tile.tool_command
+        )),
+        ToolAvailabilityStatus::Unknown => Err(format!(
+            "Fluidity could not verify whether the {} CLI is installed. {}",
+            tile.title,
+            availability.detail.unwrap_or_else(|| {
+                "Check your shell and PATH settings, then try again.".to_string()
+            })
+        )),
+    }
 }
 
 fn is_valid_tile_geometry(tile: &PersistedTile) -> bool {
@@ -1326,15 +1443,20 @@ struct TerminalLaunchPlan {
     assigned_resume: Option<TileResumeMetadata>,
 }
 
+#[cfg(test)]
 fn terminal_launch_plan(launch: &TerminalLaunchRequest) -> Result<TerminalLaunchPlan, String> {
+    let tool_tile = tool_integration_tile_for_launch(launch)?;
+    terminal_launch_plan_for_resolved_tool(launch, tool_tile.as_ref())
+}
+
+fn tool_integration_tile_for_launch(
+    launch: &TerminalLaunchRequest,
+) -> Result<Option<ToolIntegrationTile>, String> {
     if launch.kind != "tool" {
-        return Ok(TerminalLaunchPlan {
-            shell_command: None,
-            assigned_resume: None,
-        });
+        return Ok(None);
     }
 
-    let tool_tile = launch
+    launch
         .integration_id
         .as_deref()
         .zip(launch.integration_tile_id.as_deref())
@@ -1342,7 +1464,21 @@ fn terminal_launch_plan(launch: &TerminalLaunchRequest) -> Result<TerminalLaunch
             tool_integration_tile(integration_id, integration_tile_id)
         })
         .or_else(|| legacy_tool_integration_tile(launch.tool_id.as_deref(), None))
-        .ok_or_else(|| "unsupported integration tile".to_string())?;
+        .map(Some)
+        .ok_or_else(|| "unsupported integration tile".to_string())
+}
+
+fn terminal_launch_plan_for_resolved_tool(
+    launch: &TerminalLaunchRequest,
+    tool_tile: Option<&ToolIntegrationTile>,
+) -> Result<TerminalLaunchPlan, String> {
+    let Some(tool_tile) = tool_tile else {
+        return Ok(TerminalLaunchPlan {
+            shell_command: None,
+            assigned_resume: None,
+        });
+    };
+
     let existing_resume = launch
         .resume
         .clone()
@@ -1367,7 +1503,9 @@ fn terminal_launch_plan(launch: &TerminalLaunchRequest) -> Result<TerminalLaunch
     }
 
     Ok(TerminalLaunchPlan {
-        shell_command: Some(shell_command_from_args(vec![tool_tile.tool_command])),
+        shell_command: Some(shell_command_from_args(vec![tool_tile
+            .tool_command
+            .clone()])),
         assigned_resume: None,
     })
 }
@@ -1547,6 +1685,23 @@ mod tests {
             assert_eq!(plan.shell_command, Some(format!("'{}'", tool_id)));
             assert!(plan.assigned_resume.is_none());
         }
+    }
+
+    #[test]
+    fn tool_availability_reports_missing_commands_as_unavailable() {
+        let tile = ToolIntegrationTile {
+            integration_id: "missing".to_string(),
+            integration_tile_id: "cli".to_string(),
+            title: "Missing".to_string(),
+            tool_command: "__fluidity_missing_command__".to_string(),
+            resume_provider: "missing".to_string(),
+        };
+
+        let availability = tool_availability_for_tile("/bin/sh", &tile);
+
+        assert_eq!(availability.status, ToolAvailabilityStatus::Unavailable);
+        assert!(availability.resolved_path.is_none());
+        assert!(ensure_tool_available("/bin/sh", &tile).is_err());
     }
 
     #[test]

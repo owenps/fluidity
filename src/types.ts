@@ -150,3 +150,15 @@ export interface TerminalExitEvent {
   sessionId: string;
   exitCode: number | null;
 }
+
+export type ToolAvailabilityStatus = "available" | "unavailable" | "unknown";
+
+export interface ToolAvailability {
+  integrationId: string;
+  integrationTileId: string;
+  title: string;
+  command: string;
+  status: ToolAvailabilityStatus;
+  resolvedPath?: string;
+  detail?: string;
+}

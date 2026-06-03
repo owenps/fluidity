@@ -5,6 +5,7 @@ import {
   type ConfigurableTilePickerItemId,
   type TilePickerVisibility,
 } from "./tilePickerCatalog";
+import type { ToolAvailability } from "./types";
 
 function orderTilePickerItems(visibility: TilePickerVisibility) {
   return [...configurableTilePickerItems].sort((a, b) => {
@@ -18,18 +19,24 @@ interface TilePickerSettingsProps {
   active: boolean;
   open: boolean;
   visibility: TilePickerVisibility;
+  toolAvailabilityByPickerItemId: Map<string, ToolAvailability>;
+  toolAvailabilityLoaded: boolean;
   onActive: () => void;
   onOpenChange: (open: boolean) => void;
   onVisibilityChange: (itemId: ConfigurableTilePickerItemId, visible: boolean) => void;
+  onRefreshToolAvailabilities: () => void;
 }
 
 export function TilePickerSettings({
   active,
   open,
   visibility,
+  toolAvailabilityByPickerItemId,
+  toolAvailabilityLoaded,
   onActive,
   onOpenChange,
   onVisibilityChange,
+  onRefreshToolAvailabilities,
 }: TilePickerSettingsProps) {
   const [query, setQuery] = useState("");
   const [activeOptionId, setActiveOptionId] = useState<ConfigurableTilePickerItemId>(
@@ -83,6 +90,16 @@ export function TilePickerSettings({
     onVisibilityChange(item.id, !visibility[item.id]);
   };
 
+  const availabilityDetailForItem = (item: (typeof configurableTilePickerItems)[number]) => {
+    if (item.kind !== "tool") return null;
+    if (!toolAvailabilityLoaded) return "Checking availability…";
+
+    const availability = toolAvailabilityByPickerItemId.get(item.id);
+    if (availability?.status === "available") return availability.resolvedPath ?? "Available";
+    if (availability?.status === "unavailable") return "Not installed";
+    return "Availability unknown";
+  };
+
   return (
     <div className="settings-section">
       <button
@@ -133,8 +150,15 @@ export function TilePickerSettings({
             }
           }}
         >
-          <div className="settings-inline-panel-header">
-            Choose which tiles appear in the picker.
+          <div className="settings-inline-panel-header settings-integrations-header">
+            <span>Choose which tiles appear in the picker.</span>
+            <button
+              className="settings-integration-refresh-button"
+              type="button"
+              onClick={onRefreshToolAvailabilities}
+            >
+              Refresh
+            </button>
           </div>
           <div className="picker-search-row">
             <input
@@ -163,7 +187,14 @@ export function TilePickerSettings({
                   <span className="picker-option-icon" aria-hidden="true">
                     {item.icon}
                   </span>
-                  <span className="picker-option-title">{item.title}</span>
+                  <span className="picker-option-copy">
+                    <span className="picker-option-title">{item.title}</span>
+                    {availabilityDetailForItem(item) ? (
+                      <span className="picker-option-detail">
+                        {availabilityDetailForItem(item)}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="settings-row-control">
                     <Toggle
                       checked={visibility[item.id]}
