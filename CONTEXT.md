@@ -68,6 +68,10 @@ _Avoid_: Tab bar, workspace tabs, active workspace list
 A tile containing an interactive shell session for a workspace that should feel like opening a normal macOS terminal in that workspace.
 _Avoid_: Command runner, output panel, console
 
+**Terminal Session Runtime**:
+The live PTY-backed runtime machinery used to create, render, resize, write to, and close terminal-rendered sessions for Terminal Tiles and terminal-rendered Tool Tiles, excluding durable Workspace Tile State and Tile Resume Metadata ownership.
+_Avoid_: Terminal Tile Runtime, terminal state, terminal session state
+
 **Tool Tile**:
 A tile centered on an external development tool or long-running tool experience, such as an agent or third-party development tool.
 _Avoid_: Command Tile, Agent Tile, third-party tile, command runner

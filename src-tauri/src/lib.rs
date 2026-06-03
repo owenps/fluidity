@@ -1,18 +1,21 @@
-use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
+mod terminal_session_runtime;
+
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     env, fs,
-    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
-    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     menu::{IconMenuItem, Menu, NativeIcon, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Listener, Manager, Runtime, State,
+};
+use terminal_session_runtime::{
+    TerminalSessionCloseRequest, TerminalSessionCreateRequest, TerminalSessionResizeRequest,
+    TerminalSessionWriteRequest, TerminalState,
 };
 use uuid::Uuid;
 
@@ -61,17 +64,6 @@ impl WorkspaceState {
             .map(|workspace| workspace.root.clone())
             .ok_or_else(|| "no workspace is open".to_string())
     }
-}
-
-#[derive(Default)]
-struct TerminalState {
-    sessions: Mutex<HashMap<String, TerminalSession>>,
-}
-
-struct TerminalSession {
-    master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
-    child_killer: Box<dyn ChildKiller + Send + Sync>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,20 +188,6 @@ struct TerminalResizeRequest {
 #[serde(rename_all = "camelCase")]
 struct TerminalCloseRequest {
     session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TerminalOutputEvent {
-    session_id: String,
-    data: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TerminalExitEvent {
-    session_id: String,
-    exit_code: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -439,11 +417,7 @@ fn application_reset(
     *app_state = PersistedAppState::default();
     workspace_state.save(&app_state)?;
 
-    for (_, mut session) in terminal_state.sessions.lock().map_err(lock_error)?.drain() {
-        let _ = session.child_killer.kill();
-    }
-
-    Ok(())
+    terminal_state.close_all()
 }
 
 #[tauri::command]
@@ -453,55 +427,23 @@ fn terminal_create(
     workspace_state: State<'_, WorkspaceState>,
     request: TerminalCreateRequest,
 ) -> Result<TerminalCreateResponse, String> {
-    let session_id = format!("terminal-{}", Uuid::new_v4());
     let cwd = normalize_cwd(&workspace_state, &request.cwd)?;
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows: request.rows.max(1),
-            cols: request.cols.max(1),
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|error| error.to_string())?;
-
     let launch_plan = terminal_launch_plan(&request.launch)?;
-    let mut command = terminal_command(&shell, cwd, &launch_plan);
-    command.env("TERM", "xterm-256color");
-    command.env("COLORTERM", "truecolor");
-    command.env("FLUIDITY_TILE_ID", request.tile_id);
-
-    let child = pair
-        .slave
-        .spawn_command(command)
-        .map_err(|error| error.to_string())?;
-    let child_killer = child.clone_killer();
-    drop(pair.slave);
-
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|error| error.to_string())?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|error| error.to_string())?;
-
-    terminal_state.sessions.lock().map_err(lock_error)?.insert(
-        session_id.clone(),
-        TerminalSession {
-            master: pair.master,
-            writer,
-            child_killer,
+    let response = terminal_state.create(
+        app,
+        TerminalSessionCreateRequest {
+            tile_id: request.tile_id,
+            cwd,
+            shell,
+            cols: request.cols,
+            rows: request.rows,
+            shell_command: launch_plan.shell_command,
         },
-    );
-
-    spawn_output_thread(app.clone(), session_id.clone(), reader);
-    spawn_wait_thread(app, session_id.clone(), child);
+    )?;
 
     Ok(TerminalCreateResponse {
-        session_id,
+        session_id: response.session_id,
         assigned_resume: launch_plan.assigned_resume,
     })
 }
@@ -511,17 +453,10 @@ fn terminal_write(
     state: State<'_, TerminalState>,
     request: TerminalWriteRequest,
 ) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().map_err(lock_error)?;
-    let session = sessions
-        .get_mut(&request.session_id)
-        .ok_or_else(|| "terminal session not found".to_string())?;
-
-    session
-        .writer
-        .write_all(request.data.as_bytes())
-        .map_err(|error| error.to_string())?;
-    session.writer.flush().map_err(|error| error.to_string())?;
-    Ok(())
+    state.write(TerminalSessionWriteRequest {
+        session_id: request.session_id,
+        data: request.data,
+    })
 }
 
 #[tauri::command]
@@ -529,20 +464,11 @@ fn terminal_resize(
     state: State<'_, TerminalState>,
     request: TerminalResizeRequest,
 ) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().map_err(lock_error)?;
-    let session = sessions
-        .get_mut(&request.session_id)
-        .ok_or_else(|| "terminal session not found".to_string())?;
-
-    session
-        .master
-        .resize(PtySize {
-            rows: request.rows.max(1),
-            cols: request.cols.max(1),
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|error| error.to_string())
+    state.resize(TerminalSessionResizeRequest {
+        session_id: request.session_id,
+        cols: request.cols,
+        rows: request.rows,
+    })
 }
 
 #[tauri::command]
@@ -550,17 +476,9 @@ fn terminal_close(
     state: State<'_, TerminalState>,
     request: TerminalCloseRequest,
 ) -> Result<(), String> {
-    let session = state
-        .sessions
-        .lock()
-        .map_err(lock_error)?
-        .remove(&request.session_id);
-
-    if let Some(mut session) = session {
-        let _ = session.child_killer.kill();
-    }
-
-    Ok(())
+    state.close(TerminalSessionCloseRequest {
+        session_id: request.session_id,
+    })
 }
 
 pub fn run() {
@@ -596,11 +514,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             app.listen("tauri://close-requested", move |_| {
                 if let Some(state) = app_handle.try_state::<TerminalState>() {
-                    if let Ok(mut sessions) = state.sessions.lock() {
-                        for (_, mut session) in sessions.drain() {
-                            let _ = session.child_killer.kill();
-                        }
-                    }
+                    let _ = state.close_all();
                 }
             });
             Ok(())
@@ -1168,18 +1082,6 @@ fn terminal_launch_plan(launch: &TerminalLaunchRequest) -> Result<TerminalLaunch
     })
 }
 
-fn terminal_command(shell: &str, cwd: PathBuf, launch_plan: &TerminalLaunchPlan) -> CommandBuilder {
-    let mut command = CommandBuilder::new(shell);
-    command.cwd(cwd);
-
-    if let Some(shell_command) = &launch_plan.shell_command {
-        command.arg("-lc");
-        command.arg(shell_command);
-    }
-
-    command
-}
-
 fn new_preassigned_resume(tool_id: &str) -> Option<TileResumeMetadata> {
     if !matches!(tool_id, "claude" | "gemini" | "pi") {
         return None;
@@ -1266,52 +1168,6 @@ fn native_accelerator_for_command(command_id: &str) -> Option<String> {
         .into_iter()
         .find(|command| command.id == command_id)?
         .native_accelerator
-}
-
-fn spawn_output_thread(app: AppHandle, session_id: String, mut reader: Box<dyn Read + Send>) {
-    thread::spawn(move || {
-        let mut buffer = [0_u8; 8192];
-
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(count) => {
-                    let data = String::from_utf8_lossy(&buffer[..count]).to_string();
-                    let _ = app.emit(
-                        "terminal://output",
-                        TerminalOutputEvent {
-                            session_id: session_id.clone(),
-                            data,
-                        },
-                    );
-                }
-                Err(_) => break,
-            }
-        }
-    });
-}
-
-fn spawn_wait_thread(app: AppHandle, session_id: String, mut child: Box<dyn Child + Send + Sync>) {
-    thread::spawn(move || {
-        let exit_code = child
-            .wait()
-            .ok()
-            .and_then(|status| i32::try_from(status.exit_code()).ok());
-
-        if let Some(state) = app.try_state::<TerminalState>() {
-            if let Ok(mut sessions) = state.sessions.lock() {
-                sessions.remove(&session_id);
-            }
-        }
-
-        let _ = app.emit(
-            "terminal://exit",
-            TerminalExitEvent {
-                session_id,
-                exit_code,
-            },
-        );
-    });
 }
 
 fn now_unix_seconds() -> u64 {
