@@ -8,14 +8,25 @@ import {
 } from "./types";
 
 export function createDefaultTiles(): Tile[] {
+  const workspaceTileWidth = MIN_TILE_WIDTH;
+
   return [
     {
       id: createTileId(),
       kind: "terminal",
       title: "Terminal",
+      x: workspaceTileWidth,
+      y: 0,
+      w: GRID_COLUMNS - workspaceTileWidth,
+      h: GRID_ROWS,
+    },
+    {
+      id: createTileId(),
+      kind: "workspace",
+      title: "Workspaces",
       x: 0,
       y: 0,
-      w: GRID_COLUMNS,
+      w: workspaceTileWidth,
       h: GRID_ROWS,
     },
   ];

@@ -1282,21 +1282,39 @@ fn create_git_workspace(
 }
 
 fn default_workspace_tile_state() -> WorkspaceTileState {
+    let workspace_tile_width = MIN_TILE_WIDTH;
+
     WorkspaceTileState {
-        tiles: vec![PersistedTile {
-            id: format!("tile-{}", Uuid::new_v4()),
-            kind: "terminal".to_string(),
-            title: "Terminal".to_string(),
-            integration_id: None,
-            integration_tile_id: None,
-            resume: None,
-            tool_id: None,
-            initial_command: None,
-            x: 0,
-            y: 0,
-            w: GRID_COLUMNS,
-            h: GRID_ROWS,
-        }],
+        tiles: vec![
+            PersistedTile {
+                id: format!("tile-{}", Uuid::new_v4()),
+                kind: "terminal".to_string(),
+                title: "Terminal".to_string(),
+                integration_id: None,
+                integration_tile_id: None,
+                resume: None,
+                tool_id: None,
+                initial_command: None,
+                x: workspace_tile_width,
+                y: 0,
+                w: GRID_COLUMNS - workspace_tile_width,
+                h: GRID_ROWS,
+            },
+            PersistedTile {
+                id: format!("tile-{}", Uuid::new_v4()),
+                kind: "workspace".to_string(),
+                title: "Workspaces".to_string(),
+                integration_id: None,
+                integration_tile_id: None,
+                resume: None,
+                tool_id: None,
+                initial_command: None,
+                x: 0,
+                y: 0,
+                w: workspace_tile_width,
+                h: GRID_ROWS,
+            },
+        ],
     }
 }
 
@@ -2441,6 +2459,29 @@ mod tests {
     fn parse_git_numstat_count_ignores_binary_counts() {
         assert_eq!(parse_git_numstat_count("12"), Some(12));
         assert_eq!(parse_git_numstat_count("-"), None);
+    }
+
+    #[test]
+    fn default_workspace_tile_state_starts_with_terminal_and_workspace_tiles() {
+        let tile_state = default_workspace_tile_state();
+
+        assert_eq!(tile_state.tiles.len(), 2);
+
+        let terminal = &tile_state.tiles[0];
+        assert_eq!(terminal.kind, "terminal");
+        assert_eq!(terminal.title, "Terminal");
+        assert_eq!(terminal.x, MIN_TILE_WIDTH);
+        assert_eq!(terminal.y, 0);
+        assert_eq!(terminal.w, GRID_COLUMNS - MIN_TILE_WIDTH);
+        assert_eq!(terminal.h, GRID_ROWS);
+
+        let workspace = &tile_state.tiles[1];
+        assert_eq!(workspace.kind, "workspace");
+        assert_eq!(workspace.title, "Workspaces");
+        assert_eq!(workspace.x, 0);
+        assert_eq!(workspace.y, 0);
+        assert_eq!(workspace.w, MIN_TILE_WIDTH);
+        assert_eq!(workspace.h, GRID_ROWS);
     }
 
     #[test]
