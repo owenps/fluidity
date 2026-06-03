@@ -297,11 +297,6 @@ export function App() {
           setTilePickerOpen(false);
           setSettingsOpen(false);
           addWarningToasts(response.warnings);
-          addToast({
-            severity: "success",
-            title: "Workspace created",
-            detail: response.overview.current?.context.workspace.root,
-          });
         })
         .catch((error) => {
           addToast({

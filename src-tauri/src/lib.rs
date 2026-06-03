@@ -1224,13 +1224,6 @@ fn create_git_workspace(
     project: &RegisteredProject,
     warnings: &mut Vec<String>,
 ) -> Result<OpenWorkspace, String> {
-    if has_uncommitted_changes(&project.root)? {
-        warnings.push(
-            "Project root has uncommitted changes; the new workspace starts from the workspace base branch without those changes."
-                .to_string(),
-        );
-    }
-
     if !git_command_succeeds(&project.root, &["fetch"])? {
         warnings.push(
             "Could not fetch before creating the workspace; using the locally-known base branch."
@@ -1961,11 +1954,6 @@ fn workspace_base_ref(root: &str) -> Result<String, String> {
     }
 
     Err("could not find a workspace base branch; set origin/HEAD or configure an upstream for the current branch".to_string())
-}
-
-fn has_uncommitted_changes(root: &str) -> Result<bool, String> {
-    let output = run_git_command(root, &["status", "--porcelain"])?;
-    Ok(!output.trim().is_empty())
 }
 
 fn next_workspace_branch_name(app_state: &PersistedAppState, root: &str) -> Result<String, String> {
