@@ -146,8 +146,15 @@ export function KeyboardShortcutsSettings({
                       >
                         <span className="keyboard-shortcut-title">{shortcut.title}</span>
                         <span className="keyboard-shortcut-chords">
-                          {shortcut.keyChords.map((keys) => (
-                            <KeyChord key={keys.join("+")} keys={keys} />
+                          {shortcut.keyChords.map((keys, index) => (
+                            <span className="keyboard-shortcut-chord-group" key={keys.join("+")}>
+                              {index > 0 ? (
+                                <span className="keyboard-shortcut-chord-delimiter" aria-hidden="true">
+                                  /
+                                </span>
+                              ) : null}
+                              <KeyChord keys={keys} />
+                            </span>
                           ))}
                         </span>
                       </div>

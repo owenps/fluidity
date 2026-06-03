@@ -1119,6 +1119,17 @@ body {
   gap: 0.4rem;
 }
 
+.keyboard-shortcut-chord-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.keyboard-shortcut-chord-delimiter {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
 .key-chord {
   display: inline-flex;
   flex: 0 0 auto;
