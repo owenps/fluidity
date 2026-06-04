@@ -165,16 +165,40 @@ The app-owned foundation that ships with Fluidity and owns durable platform resp
 _Avoid_: Core package, platform package, built-in extension
 
 **Core Extension Pack**:
-A first-party Extension package that ships with Fluidity and contributes default user-facing capabilities through the same supported extension points available to other Extensions.
+An always-present first-party Extension package that ships with Fluidity and contributes default user-facing capabilities through the same supported extension points available to other Extensions.
 _Avoid_: Fluidity Core, built-ins, default features
 
 **Extension**:
 A user- or Fluidity-provided package that contributes capabilities to Fluidity through supported extension points.
 _Avoid_: Plugin, add-on, mod
 
+**User Extension**:
+An Extension installed for the user and available across Fluidity.
+_Avoid_: Global Extension, global extension, personal plugin
+
+**Project Extension**:
+An Extension associated with a Project and available for that Project's Workspaces.
+_Avoid_: Repository extension, local plugin, workspace extension
+
+**Extension Definition**:
+A static description of an Extension's identity and declared contributions, stored in an extension manifest file such as `fluidity.extension.json`.
+_Avoid_: Manifest, descriptor, extension config
+
+**Extension Identity**:
+The stable identifier used to distinguish an Extension and resolve its contributed capabilities across reloads and app updates.
+_Avoid_: Package name, plugin id, source path
+
+**Extension Point**:
+A supported kind of contribution that an Extension can add to Fluidity.
+_Avoid_: Hook, API endpoint, customization seam
+
+**Integration Tile Contribution**:
+An Extension Point for adding an Integration Tile to Fluidity.
+_Avoid_: Custom tool tile, tile plugin, agent tile definition
+
 **Integration**:
 A product-level connection to an external tool or platform that can inform one or more Tiles, provide Tile Resume Metadata behavior, or support workflow-specific surfaces such as PR review or PR status. An Integration may be built into Fluidity Core or contributed by an Extension.
-_Avoid_: Extension, plugin, tool tile
+_Avoid_: Provider, Extension, plugin, tool tile
 
 **Integration Tile**:
 A Tile for an external tool or platform provided by an Integration, such as a Claude CLI Tile, GitHub PR Reviewer Tile, or GitHub PR Status Tile.
