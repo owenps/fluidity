@@ -278,12 +278,10 @@ body {
 
 .workspace-shell {
   min-height: 0;
-  padding: 8px;
   background:
     linear-gradient(var(--border) 1px, transparent 1px),
     linear-gradient(90deg, var(--border) 1px, transparent 1px), var(--background);
-  background-size: calc((100vw - 16px) / var(--grid-columns, 12))
-    calc((100vh - 56px) / var(--grid-rows, 8));
+  background-size: calc(100% / var(--grid-columns, 12)) calc(100% / var(--grid-rows, 8));
 }
 
 .workspace-grid {
