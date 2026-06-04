@@ -442,11 +442,14 @@ export function SettingsView({
   function renderNavigationRow(destination: Destination, title: string) {
     const key = destinationKey(destination);
     const selected = key === selectedDestinationKey;
+    const categoryIconClass =
+      destination.kind === "category" ? `settings-sidebar-icon-${destination.id}` : "";
     return (
       <button
         key={key}
         className={[
           "settings-sidebar-row",
+          destination.kind === "category" ? "settings-sidebar-row-category" : "",
           selected ? "settings-sidebar-row-selected" : "",
           selected && focusPane === "left" ? "settings-sidebar-row-focused" : "",
         ].join(" ")}
@@ -459,7 +462,13 @@ export function SettingsView({
           viewRef.current?.focus();
         }}
       >
-        {title}
+        {destination.kind === "category" ? (
+          <span
+            className={["settings-sidebar-icon", categoryIconClass].join(" ")}
+            aria-hidden="true"
+          />
+        ) : null}
+        <span className="settings-sidebar-row-title">{title}</span>
       </button>
     );
   }

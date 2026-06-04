@@ -32,6 +32,11 @@
   --font-size-md: 13px;
   --font-size-lg: 14px;
   --font-size-xl: 18px;
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --icon-size-md: 1rem;
+  --settings-sidebar-icon-size: var(--icon-size-md);
+  --settings-sidebar-contained-icon-size: var(--font-size-sm);
   --secondary: #f5f5f5;
   --background: #ffffff;
   --font-serif: Geist Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -1097,7 +1102,7 @@ body {
 
 .settings-sidebar-section {
   display: grid;
-  gap: 0.25rem;
+  gap: var(--space-xs);
 }
 
 .settings-sidebar-heading {
@@ -1109,7 +1114,11 @@ body {
 }
 
 .settings-sidebar-row {
+  display: flex;
+  align-items: center;
   width: 100%;
+  min-width: 0;
+  gap: var(--space-sm);
   border: 0;
   padding: 0.55rem;
   background: transparent;
@@ -1118,6 +1127,41 @@ body {
   font: inherit;
   font-size: var(--font-size-sm);
   text-align: left;
+}
+
+.settings-sidebar-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-sidebar-icon {
+  --settings-sidebar-icon-mask: none;
+  --settings-sidebar-icon-mask-size: var(--settings-sidebar-contained-icon-size);
+
+  flex: 0 0 auto;
+  width: var(--settings-sidebar-icon-size);
+  height: var(--settings-sidebar-icon-size);
+  background: currentColor;
+  mask: var(--settings-sidebar-icon-mask) center / var(--settings-sidebar-icon-mask-size) no-repeat;
+}
+
+.settings-sidebar-icon-general {
+  --settings-sidebar-icon-mask: url("./assets/settings-general.svg");
+}
+
+.settings-sidebar-icon-appearance {
+  --settings-sidebar-icon-mask: url("./assets/settings-appearance.svg");
+}
+
+.settings-sidebar-icon-tiles {
+  --settings-sidebar-icon-mask: url("./assets/settings-tiles.svg");
+}
+
+.settings-sidebar-icon-keybinds {
+  --settings-sidebar-icon-mask: url("./assets/settings-keybinds.svg");
+  --settings-sidebar-icon-mask-size: var(--settings-sidebar-icon-size);
 }
 
 .settings-sidebar-row:hover,
