@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/owenps/fluidity/main/docs/schemas/fluidity-extension.v1.schema.json",
+  "title": "Fluidity Extension Definition v1",
+  "description": "Schema for v1 manifest-only Fluidity Extension Definitions stored in fluidity.extension.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "title", "contributes"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional JSON Schema URI used by editors for validation."
+    },
+    "schemaVersion": {
+      "const": 1,
+      "description": "The Extension Definition schema version. v1 definitions use the numeric value 1."
+    },
+    "id": {
+      "$ref": "#/$defs/extensionId"
+    },
+    "title": {
+      "$ref": "#/$defs/displayTitle"
+    },
+    "description": {
+      "$ref": "#/$defs/description"
+    },
+    "icon": {
+      "$ref": "#/$defs/icon"
+    },
+    "contributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["integrations"],
+      "properties": {
+        "integrations": {
+          "type": "array",
+          "description": "Integrations contributed by this Extension. Integration Tiles must be nested under their owning Integration.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/integrationContribution"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "extensionId": {
+      "type": "string",
+      "description": "Stable Extension identity. Use lower-case dotted or dashed segments such as fluidity.core or example.my-tool.",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "contributionId": {
+      "type": "string",
+      "description": "Stable contribution identity scoped to its parent object.",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+    },
+    "displayTitle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "\\S"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "integrationContribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "tiles"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/contributionId"
+        },
+        "title": {
+          "$ref": "#/$defs/displayTitle"
+        },
+        "description": {
+          "$ref": "#/$defs/description"
+        },
+        "icon": {
+          "$ref": "#/$defs/icon"
+        },
+        "tiles": {
+          "type": "array",
+          "description": "Integration Tile Contributions owned by this Integration.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/integrationTileContribution"
+          }
+        }
+      }
+    },
+    "integrationTileContribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "command"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/contributionId"
+        },
+        "kind": {
+          "const": "tool",
+          "description": "v1 Integration Tile Contributions are command-backed Tool Tiles."
+        },
+        "title": {
+          "$ref": "#/$defs/displayTitle"
+        },
+        "description": {
+          "$ref": "#/$defs/description"
+        },
+        "defaultVisible": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the Tile should be visible by default in the Tile Picker."
+        },
+        "icon": {
+          "$ref": "#/$defs/icon"
+        },
+        "command": {
+          "$ref": "#/$defs/argvCommand"
+        },
+        "resume": {
+          "$ref": "#/$defs/resumeStrategy",
+          "default": {
+            "strategy": "none"
+          }
+        }
+      }
+    },
+    "argvCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["argv"],
+      "properties": {
+        "argv": {
+          "type": "array",
+          "description": "Command and arguments passed as argv entries. Fluidity does not apply implicit shell interpolation or argument-level environment expansion.",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^[^\\u0000\\r\\n]+$"
+          }
+        }
+      }
+    },
+    "resumeStrategy": {
+      "description": "How Fluidity should create and reuse Tile Resume Metadata for this Tool Tile.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["strategy"],
+          "properties": {
+            "strategy": {
+              "const": "none",
+              "description": "Fluidity launches the command argv exactly as declared and does not assign Tile Resume Metadata."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["strategy", "arg"],
+          "properties": {
+            "strategy": {
+              "const": "session-id-arg",
+              "description": "Fluidity assigns a stable session identifier and appends it to the argv using the configured argument name."
+            },
+            "arg": {
+              "type": "string",
+              "description": "The argv entry placed immediately before the Fluidity-assigned session identifier, for example --session-id.",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000\\r\\n]+$"
+            }
+          }
+        }
+      ]
+    },
+    "icon": {
+      "description": "Icon reference. If omitted or if loading fails, Fluidity falls back to a text icon derived from the nearest Integration Tile, Integration, or Extension title.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key"],
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "First-party Fluidity icon key.",
+              "enum": ["claude", "codex", "gemini", "opencode", "pi"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Relative SVG or PNG path resolved from the directory containing fluidity.extension.json. Absolute paths, URLs, and parent-directory traversal are not allowed.",
+              "minLength": 5,
+              "maxLength": 260,
+              "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*:)(?!.*(?:^|/)\\.\\.?(?:/|$)).+\\.(?:svg|png)$"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -18,7 +18,7 @@ Fluidity's extensibility direction is to make the application a customizable pla
 - Tool Tile processes inherit the normal process environment; tools that need environment variables should read them directly or explicitly invoke a shell.
 - v1 Tool Tile resume behavior uses explicit strategies, starting with `none` and `session-id-arg` rather than arbitrary launch templates.
 - Persisted Integration Tiles resolve by `extensionId + integrationId + integrationTileId`, not by Integration identity alone.
-- v1 Extensions use an **Extension Definition** stored in `fluidity.extension.json` with a `schemaVersion` field.
+- v1 Extensions use an **Extension Definition** stored in `fluidity.extension.json` with a `schemaVersion` field; the v1 schema is documented in [Extension Definitions](extension-definitions.md).
 - `fluidity.extension.json` is a forward-compatible declaration layer, not a permanent rejection of executable Extension modules.
 - Fluidity should support both **User Extensions** and **Project Extensions**.
 - User Extensions live under Fluidity's app data directory at `extensions/<extension-id>/fluidity.extension.json` and are available across Fluidity.
