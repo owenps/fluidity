@@ -41,12 +41,17 @@ export type Tile = TerminalWorkspaceTile | ToolWorkspaceTile | WorkspaceStackTil
 
 export type ProjectKind = "git" | "plain";
 
+export interface ProjectSettings {
+  deleteWorkspaceBranchOnDiscard: boolean;
+}
+
 export interface RegisteredProject {
   id: string;
   name: string;
   root: string;
   kind: ProjectKind;
   rootAvailable?: boolean;
+  settings: ProjectSettings;
 }
 
 export interface Project {

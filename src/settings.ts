@@ -4,8 +4,6 @@ import {
   type TilePickerVisibility,
 } from "./tilePickerCatalog";
 
-const settingsStorageKey = "fluidity.settings.v1";
-const deltaSettingsStorageKey = "delta.settings.v1";
 const terminalFontSizeMin = 10;
 const terminalFontSizeMax = 24;
 
@@ -17,15 +15,7 @@ export interface AppSettings {
   tilePickerVisibility: TilePickerVisibility;
 }
 
-interface StoredSettings {
-  debugLayout?: unknown;
-  terminalFontSize?: unknown;
-  tileHeadersVisible?: unknown;
-  deletionPositiveStatColors?: unknown;
-  tilePickerVisibility?: unknown;
-}
-
-export function createDefaultAppSettings(debugLayout: boolean): AppSettings {
+export function createDefaultAppSettings(debugLayout = false): AppSettings {
   return {
     debugLayout,
     terminalFontSize: 13,
@@ -35,61 +25,27 @@ export function createDefaultAppSettings(debugLayout: boolean): AppSettings {
   };
 }
 
-export function readAppSettings(defaultDebugLayout: boolean): AppSettings {
-  const defaults = createDefaultAppSettings(defaultDebugLayout);
-  if (typeof window === "undefined") return defaults;
-
-  try {
-    const rawSettings =
-      window.localStorage.getItem(settingsStorageKey) ??
-      window.localStorage.getItem(deltaSettingsStorageKey);
-    if (!rawSettings) return defaults;
-
-    const stored = JSON.parse(rawSettings) as StoredSettings;
-    return {
-      debugLayout:
-        typeof stored.debugLayout === "boolean" ? stored.debugLayout : defaults.debugLayout,
-      terminalFontSize:
-        typeof stored.terminalFontSize === "number" && Number.isFinite(stored.terminalFontSize)
-          ? Math.min(terminalFontSizeMax, Math.max(terminalFontSizeMin, stored.terminalFontSize))
-          : defaults.terminalFontSize,
-      tileHeadersVisible:
-        typeof stored.tileHeadersVisible === "boolean"
-          ? stored.tileHeadersVisible
-          : defaults.tileHeadersVisible,
-      deletionPositiveStatColors:
-        typeof stored.deletionPositiveStatColors === "boolean"
-          ? stored.deletionPositiveStatColors
-          : defaults.deletionPositiveStatColors,
-      tilePickerVisibility: readTilePickerVisibility(
-        stored.tilePickerVisibility,
-        defaults.tilePickerVisibility,
-      ),
-    };
-  } catch {
-    return defaults;
-  }
-}
-
-export function writeAppSettings(settings: AppSettings) {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings));
-  } catch {
-    // Ignore storage failures so settings remain usable for the current session.
-  }
-}
-
-export function clearAppSettings() {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.localStorage.removeItem(settingsStorageKey);
-    window.localStorage.removeItem(deltaSettingsStorageKey);
-  } catch {
-    // Ignore storage failures so reset can still clear in-memory state.
-  }
+export function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): AppSettings {
+  const defaults = createDefaultAppSettings();
+  return {
+    debugLayout: typeof value?.debugLayout === "boolean" ? value.debugLayout : defaults.debugLayout,
+    terminalFontSize:
+      typeof value?.terminalFontSize === "number" && Number.isFinite(value.terminalFontSize)
+        ? Math.min(terminalFontSizeMax, Math.max(terminalFontSizeMin, value.terminalFontSize))
+        : defaults.terminalFontSize,
+    tileHeadersVisible:
+      typeof value?.tileHeadersVisible === "boolean"
+        ? value.tileHeadersVisible
+        : defaults.tileHeadersVisible,
+    deletionPositiveStatColors:
+      typeof value?.deletionPositiveStatColors === "boolean"
+        ? value.deletionPositiveStatColors
+        : defaults.deletionPositiveStatColors,
+    tilePickerVisibility: readTilePickerVisibility(
+      value?.tilePickerVisibility,
+      defaults.tilePickerVisibility,
+    ),
+  };
 }
 
 function readTilePickerVisibility(

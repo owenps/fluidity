@@ -5,15 +5,11 @@ import { KeyCap } from "./KeyCap";
 import { Picker, type PickerItem } from "./Picker";
 import { APP_NAME } from "./appConstants";
 import { resetApplication } from "./applicationClient";
-import { SettingsModal } from "./SettingsModal";
+import { SettingsView } from "./SettingsView";
 import { listToolAvailabilities } from "./integrationClient";
 import { addProject, listProjects, removeProject } from "./projectClient";
-import {
-  clearAppSettings,
-  createDefaultAppSettings,
-  readAppSettings,
-  writeAppSettings,
-} from "./settings";
+import { createDefaultAppSettings, type AppSettings } from "./settings";
+import { getAppSettings, updateAppSettings, updateProjectSettings } from "./settingsClient";
 import { TerminalTile } from "./TerminalTile";
 import {
   closeAllTerminalSessionRuntimes,
@@ -37,6 +33,7 @@ import {
   type CurrentWorkspaceResponse,
   type DirtyConfirmation,
   type OpenWorkspaceSummary,
+  type ProjectSettings,
   type RegisteredProject,
   type TerminalLaunch,
   type Tile,
@@ -123,7 +120,8 @@ export function App() {
   const [currentWorkspaceDiscardable, setCurrentWorkspaceDiscardable] = useState(false);
   const [tilePickerOpen, setTilePickerOpen] = useState(false);
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsViewOpen, setSettingsViewOpen] = useState(false);
+  const [settingsViewFocusToken, setSettingsViewFocusToken] = useState(0);
   const [openWorkspaces, setOpenWorkspaces] = useState<OpenWorkspaceSummary[]>([]);
   const [layoutMutationPreview, setLayoutMutationPreview] = useState(false);
   const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
@@ -131,7 +129,7 @@ export function App() {
   const [toasts, setToasts] = useState<AppToast[]>([]);
   const [toolAvailabilities, setToolAvailabilities] = useState<ToolAvailability[]>([]);
   const [toolAvailabilityLoaded, setToolAvailabilityLoaded] = useState(false);
-  const [settings, setSettings] = useState(() => readAppSettings(import.meta.env.DEV));
+  const [settings, setSettings] = useState<AppSettings>(() => createDefaultAppSettings());
   const {
     debugLayout,
     terminalFontSize,
@@ -199,8 +197,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    writeAppSettings(settings);
-  }, [settings]);
+    void getAppSettings()
+      .then(setSettings)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     void getWorkspaceOverview()
@@ -319,10 +319,10 @@ export function App() {
   }, [refreshToolAvailabilities]);
 
   useEffect(() => {
-    if (tilePickerOpen || settingsOpen) {
+    if (tilePickerOpen || settingsViewOpen) {
       refreshToolAvailabilities();
     }
-  }, [refreshToolAvailabilities, settingsOpen, tilePickerOpen]);
+  }, [refreshToolAvailabilities, settingsViewOpen, tilePickerOpen]);
 
   const toolAvailabilityByPickerItemId = useMemo(
     () =>
@@ -344,7 +344,7 @@ export function App() {
         applyWorkspaceOverview(response.overview);
         setTilePickerOpen(false);
         setWorkspacePickerOpen(false);
-        setSettingsOpen(false);
+        setSettingsViewOpen(false);
         addWarningToasts(response.warnings);
         addToast({
           severity: response.duplicate ? "info" : "success",
@@ -368,7 +368,7 @@ export function App() {
           applyWorkspaceOverview(response.overview);
           setWorkspacePickerOpen(false);
           setTilePickerOpen(false);
-          setSettingsOpen(false);
+          setSettingsViewOpen(false);
           addWarningToasts(response.warnings);
         })
         .catch((error) => {
@@ -422,8 +422,7 @@ export function App() {
   );
 
   const resetClientState = useCallback(() => {
-    clearAppSettings();
-    setSettings(createDefaultAppSettings(import.meta.env.DEV));
+    setSettings(createDefaultAppSettings());
     setContext(null);
     setCurrentWorkspaceId(null);
     setCurrentWorkspaceDiscardable(false);
@@ -434,7 +433,7 @@ export function App() {
     setProjectsLoaded(true);
     setTilePickerOpen(false);
     setWorkspacePickerOpen(false);
-    setSettingsOpen(false);
+    setSettingsViewOpen(false);
   }, []);
 
   const runResetApplication = useCallback(() => {
@@ -537,6 +536,13 @@ export function App() {
     runDiscardWorkspace(currentWorkspaceId);
   }, [currentWorkspaceDiscardable, currentWorkspaceId, runDiscardWorkspace]);
 
+  const openSettingsView = useCallback(() => {
+    setSettingsViewOpen(true);
+    setSettingsViewFocusToken((token) => token + 1);
+    setTilePickerOpen(false);
+    setWorkspacePickerOpen(false);
+  }, []);
+
   const commandApi = useMemo<AppCommandApi>(
     () => ({
       getState: () => layoutRef.current,
@@ -554,17 +560,17 @@ export function App() {
       },
       openTilePicker: () => setTilePickerOpen(true),
       openWorkspacePicker: () => setWorkspacePickerOpen(true),
-      openSettings: () => setSettingsOpen(true),
+      openSettings: openSettingsView,
       addProject: runAddProject,
       discardWorkspace: runDiscardCurrentWorkspace,
     }),
-    [runAddProject, runDiscardCurrentWorkspace],
+    [openSettingsView, runAddProject, runDiscardCurrentWorkspace],
   );
 
   useEffect(() => {
     const unlistenFns: UnlistenFn[] = [];
 
-    void listen("app://open-settings", () => setSettingsOpen(true))
+    void listen("app://open-settings", openSettingsView)
       .then((unlistenSettingsEvent) => {
         unlistenFns.push(unlistenSettingsEvent);
       })
@@ -589,7 +595,7 @@ export function App() {
       .catch(() => {});
 
     return () => unlistenFns.forEach((unlisten) => unlisten());
-  }, [runAddProject, runDiscardCurrentWorkspace]);
+  }, [openSettingsView, runAddProject, runDiscardCurrentWorkspace]);
 
   useEffect(() => {
     if (!contextLoaded || !currentWorkspaceId) return;
@@ -615,7 +621,7 @@ export function App() {
         layoutRef.current.focusModeTileId &&
         !tilePickerOpen &&
         !workspacePickerOpen &&
-        !settingsOpen
+        !settingsViewOpen
       ) {
         event.preventDefault();
         event.stopPropagation();
@@ -629,6 +635,8 @@ export function App() {
       event.preventDefault();
       event.stopPropagation();
 
+      if (settingsViewOpen && commandId !== "settings.open") return;
+
       const command = commandById.get(commandId);
       if (!command || !command.canRun(layoutRef.current)) return;
       command.run(commandApi);
@@ -636,36 +644,53 @@ export function App() {
 
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [commandApi, commandById, settingsOpen, tilePickerOpen, workspacePickerOpen]);
+  }, [commandApi, commandById, settingsViewOpen, tilePickerOpen, workspacePickerOpen]);
 
   const workspaceRoot = context?.workspace.root;
   const showGitBranch = Boolean(context?.gitBranch && context.gitBranch !== context.workspace.name);
   const projectName = context?.project.name ?? (contextLoaded ? "" : "Loading project");
 
+  const updateSettings = (updater: (previous: AppSettings) => AppSettings) => {
+    setSettings((previous) => {
+      const nextSettings = updater(previous);
+      void updateAppSettings(nextSettings).catch(() => {});
+      return nextSettings;
+    });
+  };
+
   const setDebugLayoutSetting = (debugLayout: boolean) => {
-    setSettings((previous) => ({ ...previous, debugLayout }));
+    updateSettings((previous) => ({ ...previous, debugLayout }));
   };
 
   const setTerminalFontSizeSetting = (terminalFontSize: number) => {
-    setSettings((previous) => ({ ...previous, terminalFontSize }));
+    updateSettings((previous) => ({ ...previous, terminalFontSize }));
   };
 
   const setTileHeadersVisibleSetting = (tileHeadersVisible: boolean) => {
-    setSettings((previous) => ({ ...previous, tileHeadersVisible }));
+    updateSettings((previous) => ({ ...previous, tileHeadersVisible }));
   };
 
   const setDeletionPositiveStatColorsSetting = (deletionPositiveStatColors: boolean) => {
-    setSettings((previous) => ({ ...previous, deletionPositiveStatColors }));
+    updateSettings((previous) => ({ ...previous, deletionPositiveStatColors }));
   };
 
   const setTilePickerItemVisibility = (itemId: ConfigurableTilePickerItemId, visible: boolean) => {
-    setSettings((previous) => ({
+    updateSettings((previous) => ({
       ...previous,
       tilePickerVisibility: {
         ...previous.tilePickerVisibility,
         [itemId]: visible,
       },
     }));
+  };
+
+  const setProjectSettings = (projectId: string, projectSettings: ProjectSettings) => {
+    setRegisteredProjects((previous) =>
+      previous.map((project) =>
+        project.id === projectId ? { ...project, settings: projectSettings } : project,
+      ),
+    );
+    void updateProjectSettings(projectId, projectSettings).catch(() => refreshProjects());
   };
 
   const createTile = (
@@ -886,8 +911,8 @@ export function App() {
         )}
       </section>
 
-      {settingsOpen ? (
-        <SettingsModal
+      {settingsViewOpen ? (
+        <SettingsView
           debugLayout={debugLayout}
           onDebugLayoutChange={setDebugLayoutSetting}
           terminalFontSize={terminalFontSize}
@@ -903,11 +928,11 @@ export function App() {
           onRefreshToolAvailabilities={refreshToolAvailabilities}
           projects={registeredProjects}
           projectsLoaded={projectsLoaded}
-          currentProjectRoot={context?.project.root ?? null}
-          onRefreshProjects={refreshProjects}
+          onProjectSettingsChange={setProjectSettings}
           onRemoveProject={runRemoveProject}
           onResetApplication={runResetApplication}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => setSettingsViewOpen(false)}
+          focusToken={settingsViewFocusToken}
         />
       ) : null}
 

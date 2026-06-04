@@ -2,7 +2,7 @@ mod terminal_session_runtime;
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env, fs,
     path::{Path, PathBuf},
     process::Command,
@@ -69,6 +69,8 @@ impl WorkspaceState {
 #[serde(rename_all = "camelCase")]
 struct PersistedAppState {
     version: u32,
+    #[serde(default)]
+    settings: AppSettings,
     projects: Vec<RegisteredProject>,
     open_workspaces: Vec<OpenWorkspace>,
     #[serde(default)]
@@ -83,6 +85,7 @@ impl Default for PersistedAppState {
     fn default() -> Self {
         Self {
             version: APP_STATE_VERSION,
+            settings: AppSettings::default(),
             projects: Vec::new(),
             open_workspaces: Vec::new(),
             workspace_stack: Vec::new(),
@@ -90,6 +93,49 @@ impl Default for PersistedAppState {
             generated_workspace_branch_names: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppSettings {
+    debug_layout: bool,
+    terminal_font_size: f64,
+    tile_headers_visible: bool,
+    deletion_positive_stat_colors: bool,
+    #[serde(default)]
+    tile_picker_visibility: HashMap<String, bool>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            debug_layout: false,
+            terminal_font_size: 13.0,
+            tile_headers_visible: true,
+            deletion_positive_stat_colors: false,
+            tile_picker_visibility: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ProjectSettings {
+    #[serde(default)]
+    delete_workspace_branch_on_discard: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppSettingsUpdateRequest {
+    settings: AppSettings,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectSettingsUpdateRequest {
+    project_id: String,
+    settings: ProjectSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -428,6 +474,8 @@ struct RegisteredProject {
     name: String,
     root: String,
     kind: ProjectKind,
+    #[serde(default)]
+    settings: ProjectSettings,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -438,6 +486,7 @@ struct RegisteredProjectListItem {
     root: String,
     kind: ProjectKind,
     root_available: bool,
+    settings: ProjectSettings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -469,6 +518,40 @@ fn project_list(
 ) -> Result<Vec<RegisteredProjectListItem>, String> {
     let app_state = state.app_state.lock().map_err(lock_error)?;
     Ok(app_state.projects.iter().map(project_list_item).collect())
+}
+
+#[tauri::command]
+fn app_settings_get(state: State<'_, WorkspaceState>) -> Result<AppSettings, String> {
+    let app_state = state.app_state.lock().map_err(lock_error)?;
+    Ok(app_state.settings.clone())
+}
+
+#[tauri::command]
+fn app_settings_update(
+    state: State<'_, WorkspaceState>,
+    request: AppSettingsUpdateRequest,
+) -> Result<AppSettings, String> {
+    let mut app_state = state.app_state.lock().map_err(lock_error)?;
+    app_state.settings = request.settings;
+    state.save(&app_state)?;
+    Ok(app_state.settings.clone())
+}
+
+#[tauri::command]
+fn project_settings_update(
+    state: State<'_, WorkspaceState>,
+    request: ProjectSettingsUpdateRequest,
+) -> Result<RegisteredProjectListItem, String> {
+    let mut app_state = state.app_state.lock().map_err(lock_error)?;
+    let project = app_state
+        .projects
+        .iter_mut()
+        .find(|project| project.id == request.project_id)
+        .ok_or_else(|| "project not found".to_string())?;
+    project.settings = request.settings;
+    let response = project_list_item(project);
+    state.save(&app_state)?;
+    Ok(response)
 }
 
 #[tauri::command]
@@ -659,7 +742,9 @@ fn workspace_discard(
     request: WorkspaceDiscardRequest,
 ) -> Result<WorkspaceDiscardResponse, String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
-    let target = workspace_cleanup_target(&app_state, &request.workspace_id)?;
+    let mut target = workspace_cleanup_target(&app_state, &request.workspace_id)?;
+    target.workspace.git_branch = observed_git_branch(target.project.kind, &target.workspace.root)
+        .or(target.workspace.git_branch.clone());
     if !workspace_discardable(&state.app_data_dir, &target.project, &target.workspace) {
         return Err("workspace is not discardable".to_string());
     }
@@ -697,6 +782,7 @@ fn workspace_discard(
         request.confirm_dirty,
         &mut warnings,
     )?;
+    delete_workspace_branch_after_discard(&target, &mut warnings);
     remove_workspaces_from_state(&mut app_state, &[request.workspace_id]);
     normalize_workspace_stack(&mut app_state);
     state.save(&app_state)?;
@@ -899,6 +985,9 @@ pub fn run() {
             workspace_overview,
             workspace_discard,
             workspace_switch,
+            app_settings_get,
+            app_settings_update,
+            project_settings_update,
             project_list,
             project_add,
             project_remove,
@@ -1850,6 +1939,55 @@ fn remove_workspace_root(
     }
 }
 
+fn delete_workspace_branch_after_discard(
+    target: &WorkspaceCleanupTarget,
+    warnings: &mut Vec<String>,
+) {
+    if !target.project.settings.delete_workspace_branch_on_discard {
+        return;
+    }
+    if target.project.kind != ProjectKind::Git {
+        return;
+    }
+
+    let Some(branch) = target.workspace.git_branch.as_deref() else {
+        return;
+    };
+    if branch.trim().is_empty() {
+        return;
+    }
+
+    if !Path::new(&target.project.root).is_dir() {
+        warnings.push(format!(
+            "Local branch {branch} was kept because the Project root is unavailable."
+        ));
+        return;
+    }
+
+    if !local_git_branch_exists(&target.project.root, branch) {
+        return;
+    }
+
+    if observed_git_branch(ProjectKind::Git, &target.project.root).as_deref() == Some(branch) {
+        warnings.push(format!(
+            "Local branch {branch} was kept because it is checked out in the Project root."
+        ));
+        return;
+    }
+
+    if let Err(error) = run_git_command(&target.project.root, &["branch", "-d", "--", branch]) {
+        warnings.push(format!(
+            "Local branch {branch} was kept because git did not consider it safe to delete: {error}"
+        ));
+    }
+}
+
+fn local_git_branch_exists(root: &str, branch: &str) -> bool {
+    local_git_branch_names(root)
+        .map(|branches| branches.contains(branch))
+        .unwrap_or(false)
+}
+
 fn workspace_discardable(
     app_data_dir: &Path,
     project: &RegisteredProject,
@@ -1885,6 +2023,7 @@ fn registered_project_for_root(root: &Path) -> RegisteredProject {
         name: project_name_for_root(Path::new(&root)),
         kind: project_kind_for_root(&root),
         root,
+        settings: ProjectSettings::default(),
     }
 }
 
@@ -1895,6 +2034,7 @@ fn project_list_item(project: &RegisteredProject) -> RegisteredProjectListItem {
         root: project.root.clone(),
         kind: project.kind,
         root_available: Path::new(&project.root).is_dir(),
+        settings: project.settings.clone(),
     }
 }
 
@@ -2402,6 +2542,7 @@ mod tests {
     fn workspace_stack_migrates_legacy_current_first_then_last_used() {
         let mut app_state = PersistedAppState {
             version: APP_STATE_VERSION,
+            settings: AppSettings::default(),
             projects: Vec::new(),
             open_workspaces: vec![
                 test_workspace("workspace-a", 10),
@@ -2425,6 +2566,7 @@ mod tests {
     fn remove_workspaces_from_state_removes_stack_entries() {
         let mut app_state = PersistedAppState {
             version: APP_STATE_VERSION,
+            settings: AppSettings::default(),
             projects: Vec::new(),
             open_workspaces: vec![
                 test_workspace("workspace-a", 0),

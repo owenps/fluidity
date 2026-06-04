@@ -120,17 +120,33 @@ _Avoid_: Layout, template, preset
 A named user action that can be invoked from the keyboard or command palette.
 _Avoid_: Action, shortcut, menu item
 
+**Keybind**:
+A keyboard input mapped to a Command.
+_Avoid_: Keyboard shortcut, hotkey
+
 **Settings**:
 Global user preferences that apply across Fluidity.
-_Avoid_: Preferences, config
+_Avoid_: Preferences, config, general settings
 
 **Project Settings**:
-Preferences that apply to one project.
+Preferences that apply to one project and may override matching Settings defaults.
 _Avoid_: Repository settings, folder settings
+
+**Settings View**:
+An app-level surface for viewing and changing Settings and Project Settings, separate from any Workspace's Tiles.
+_Avoid_: Settings modal, Settings tile, Preferences window
+
+**Settings Category**:
+A named grouping of related Settings within the Settings View.
+_Avoid_: Settings tab, Preferences pane
 
 **Registered Project**:
 A project root saved in Fluidity so its workspaces can be opened and managed later.
 _Avoid_: Open project, recent folder, repository bookmark, workspace
+
+**Unavailable Registered Project**:
+A Registered Project whose Project root cannot currently be accessed by Fluidity.
+_Avoid_: Missing project, deleted project
 
 **Project Disconnect**:
 The user action that removes a Registered Project from Fluidity, closes its Open Workspaces, and removes their Fluidity-managed filesystem roots without deleting the Project root or branches.
@@ -144,10 +160,22 @@ _Avoid_: Factory reset, clear cache, uninstall
 The global collection of registered projects known to Fluidity.
 _Avoid_: Project settings, recent projects, folder list
 
+**Fluidity Core**:
+The app-owned foundation that ships with Fluidity and owns durable platform responsibilities such as Projects, Workspaces, Tiles, Commands, Settings, persistence, security boundaries, and Extension loading.
+_Avoid_: Core package, platform package, built-in extension
+
+**Core Extension Pack**:
+A first-party Extension package that ships with Fluidity and contributes default user-facing capabilities through the same supported extension points available to other Extensions.
+_Avoid_: Fluidity Core, built-ins, default features
+
+**Extension**:
+A user- or Fluidity-provided package that contributes capabilities to Fluidity through supported extension points.
+_Avoid_: Plugin, add-on, mod
+
 **Integration**:
-A product-level connection to an external tool or platform that can inform one or more Tiles, provide Tile Resume Metadata behavior, or support workflow-specific surfaces such as PR review or PR status.
-_Avoid_: plugin, extension, tool tile
+A product-level connection to an external tool or platform that can inform one or more Tiles, provide Tile Resume Metadata behavior, or support workflow-specific surfaces such as PR review or PR status. An Integration may be built into Fluidity Core or contributed by an Extension.
+_Avoid_: Extension, plugin, tool tile
 
 **Integration Tile**:
-A Tile provided by an Integration, such as a Claude CLI Tile, GitHub PR Reviewer Tile, or GitHub PR Status Tile.
+A Tile for an external tool or platform provided by an Integration, such as a Claude CLI Tile, GitHub PR Reviewer Tile, or GitHub PR Status Tile.
 _Avoid_: tile offering, capability, feature, tool
