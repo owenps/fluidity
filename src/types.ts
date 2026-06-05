@@ -29,6 +29,7 @@ export interface TerminalWorkspaceTile extends BaseTile {
 
 export interface ToolWorkspaceTile extends BaseTile {
   kind: "tool";
+  extensionId: string;
   integrationId: string;
   integrationTileId: string;
 }
@@ -179,6 +180,7 @@ export type TerminalLaunch =
   | { kind: "shell" }
   | {
       kind: "tool";
+      extensionId: string;
       integrationId: string;
       integrationTileId: string;
       resume?: TileResumeMetadata;
@@ -225,7 +227,74 @@ export interface TerminalExitEvent {
 
 export type ToolAvailabilityStatus = "available" | "unavailable" | "unknown";
 
+export interface IntegrationCatalogListRequest {
+  workspaceId?: string | null;
+}
+
+export interface IntegrationCatalogResponse {
+  tiles: IntegrationCatalogTile[];
+  diagnostics: ExtensionDiagnostic[];
+}
+
+export interface IntegrationCatalogTile {
+  extensionId: string;
+  integrationId: string;
+  integrationTileId: string;
+  title: string;
+  defaultVisible: boolean;
+  icon?: IntegrationCatalogTileIcon;
+  provenance: ExtensionContributionProvenance;
+}
+
+export type IntegrationCatalogTileIcon =
+  | { kind: "key"; key: string; fallbackText: string }
+  | { kind: "path"; path: string; fallbackText: string }
+  | { kind: "text"; fallbackText: string };
+
+export interface ExtensionContributionProvenance {
+  sourceKind: "core" | "global" | "project";
+  extensionId: string;
+  manifestPath?: string;
+  projectId?: string;
+  projectRoot?: string;
+}
+
+export interface ExtensionDiagnostic extends ExtensionContributionProvenance {
+  severity: "warning" | "error";
+  message: string;
+}
+
+export interface ExtensionSettingsListRequest {
+  workspaceId?: string | null;
+}
+
+export interface ExtensionSettingsResponse {
+  extensions: ExtensionSettingsEntry[];
+  diagnostics: ExtensionDiagnostic[];
+}
+
+export type ExtensionSettingsStatus = "loaded" | "invalid" | "skipped";
+
+export interface ExtensionSettingsEntry extends ExtensionContributionProvenance {
+  title: string;
+  status: ExtensionSettingsStatus;
+  diagnostics: ExtensionDiagnostic[];
+  tiles: ExtensionSettingsTile[];
+}
+
+export interface ExtensionSettingsTile {
+  integrationId: string;
+  integrationTileId: string;
+  title: string;
+  defaultVisible: boolean;
+}
+
+export interface ToolAvailabilityListRequest {
+  workspaceId?: string | null;
+}
+
 export interface ToolAvailability {
+  extensionId: string;
   integrationId: string;
   integrationTileId: string;
   title: string;
@@ -233,4 +302,5 @@ export interface ToolAvailability {
   status: ToolAvailabilityStatus;
   resolvedPath?: string;
   detail?: string;
+  provenance: ExtensionContributionProvenance;
 }

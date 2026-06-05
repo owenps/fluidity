@@ -516,6 +516,7 @@ body {
 
 .terminal-host,
 .tile-placeholder,
+.tile-unavailable,
 .workspace-stack-tile {
   width: 100%;
   height: 100%;
@@ -529,6 +530,25 @@ body {
   place-items: center;
   color: var(--muted-foreground);
   font-size: 12px;
+}
+
+.tile-unavailable {
+  display: grid;
+  place-content: center;
+  gap: 0.45rem;
+  padding: 1rem;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.tile-unavailable strong {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.tile-unavailable code {
+  color: var(--foreground);
 }
 
 .workspace-stack-tile {
@@ -1162,6 +1182,10 @@ body {
   --settings-sidebar-icon-mask-size: var(--settings-sidebar-icon-size);
 }
 
+.settings-sidebar-icon-extensions {
+  --settings-sidebar-icon-mask: url("./assets/settings-extensions.svg");
+}
+
 .settings-sidebar-row:hover,
 .settings-sidebar-row-selected {
   background: var(--accent);
@@ -1565,6 +1589,183 @@ body {
 .selector-option-active {
   background: var(--accent);
   outline: 1px solid var(--border);
+}
+
+.settings-extensions-body,
+.settings-keybinds-body {
+  max-width: none;
+}
+
+.settings-extensions-panel {
+  min-width: 0;
+}
+
+.settings-extensions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.settings-extension-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  align-items: start;
+  gap: 0.85rem;
+  padding: 0.75rem;
+}
+
+.settings-extension-card {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.settings-extension-card-invalid,
+.settings-extension-card-skipped {
+  border-color: color-mix(in srgb, var(--destructive) 45%, var(--border));
+}
+
+.settings-extension-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.settings-extension-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-extension-status {
+  flex: 0 0 auto;
+  padding: 0.12rem 0.4rem;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.settings-extension-status-loaded {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.settings-extension-status-invalid,
+.settings-extension-status-skipped {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+
+.settings-extension-meta {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  background: var(--border);
+}
+
+.settings-extension-meta > div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.45rem 0.55rem;
+  background: var(--popover);
+}
+
+.settings-extension-meta dt,
+.settings-extension-meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-extension-meta dt {
+  color: var(--muted-foreground);
+}
+
+.settings-extension-subsection {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.settings-extension-subtitle {
+  color: var(--muted-foreground);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.settings-extension-tile-list,
+.settings-extension-diagnostics {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.settings-extension-tile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 0.75rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.settings-extension-tile span,
+.settings-extension-tile code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-extension-tile code {
+  flex: 0 1 auto;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 11px;
+}
+
+.settings-extension-diagnostic,
+.settings-extension-muted,
+.settings-extension-empty {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.settings-extension-diagnostic {
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--popover);
+}
+
+.settings-extension-diagnostic-error {
+  border-color: color-mix(in srgb, var(--destructive) 45%, var(--border));
+  color: var(--destructive);
+}
+
+.settings-extension-empty,
+.settings-extension-global-diagnostics {
+  padding: 0.75rem;
 }
 
 .settings-keybinds-body {

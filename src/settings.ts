@@ -1,6 +1,6 @@
 import {
   createDefaultTilePickerVisibility,
-  configurableTilePickerItems,
+  defaultConfigurableTilePickerItems,
   type TilePickerVisibility,
 } from "./tilePickerCatalog";
 
@@ -55,10 +55,20 @@ function readTilePickerVisibility(
   if (!value || typeof value !== "object") return defaults;
 
   const stored = value as Partial<Record<keyof TilePickerVisibility, unknown>>;
-  return Object.fromEntries(
-    configurableTilePickerItems.map((item) => [
-      item.id,
-      typeof stored[item.id] === "boolean" ? stored[item.id] : defaults[item.id],
-    ]),
-  ) as TilePickerVisibility;
+  const normalized = { ...defaults };
+
+  for (const item of defaultConfigurableTilePickerItems) {
+    const visible = stored[item.id];
+    if (typeof visible === "boolean") {
+      normalized[item.id] = visible;
+    }
+  }
+
+  for (const [itemId, visible] of Object.entries(stored)) {
+    if (typeof visible === "boolean") {
+      normalized[itemId] = visible;
+    }
+  }
+
+  return normalized as TilePickerVisibility;
 }

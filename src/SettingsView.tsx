@@ -5,17 +5,25 @@ import { KeyChord } from "./KeyCap";
 import { Slider } from "./Slider";
 import { Toggle } from "./Toggle";
 import {
-  configurableTilePickerItems,
+  defaultConfigurableTilePickerItems,
+  type ConfigurableTilePickerCatalogItem,
   type ConfigurableTilePickerItemId,
   type TilePickerVisibility,
 } from "./tilePickerCatalog";
-import type { ProjectSettings, RegisteredProject, ToolAvailability } from "./types";
+import type {
+  ExtensionDiagnostic,
+  ExtensionSettingsEntry,
+  ExtensionSettingsResponse,
+  ProjectSettings,
+  RegisteredProject,
+  ToolAvailability,
+} from "./types";
 
 const terminalFontSizeMin = 10;
 const terminalFontSizeMax = 24;
 const terminalFontSizeStep = 1;
 
-type SettingsCategoryId = "general" | "appearance" | "tiles" | "keybinds";
+type SettingsCategoryId = "general" | "appearance" | "tiles" | "extensions" | "keybinds";
 type Destination = { kind: "category"; id: SettingsCategoryId } | { kind: "project"; id: string };
 type FocusPane = "left" | "right";
 
@@ -23,6 +31,7 @@ const settingsCategories: { id: SettingsCategoryId; title: string }[] = [
   { id: "general", title: "General" },
   { id: "appearance", title: "Appearance" },
   { id: "tiles", title: "Tiles" },
+  { id: "extensions", title: "Extensions" },
   { id: "keybinds", title: "Keybinds" },
 ];
 
@@ -36,10 +45,14 @@ interface SettingsViewProps {
   deletionPositiveStatColors: boolean;
   onDeletionPositiveStatColorsChange: (enabled: boolean) => void;
   tilePickerVisibility: TilePickerVisibility;
+  configurableTilePickerItems: ConfigurableTilePickerCatalogItem[];
   toolAvailabilityByPickerItemId: Map<string, ToolAvailability>;
   toolAvailabilityLoaded: boolean;
   onTilePickerVisibilityChange: (itemId: ConfigurableTilePickerItemId, visible: boolean) => void;
   onRefreshToolAvailabilities: () => void;
+  extensionSettings: ExtensionSettingsResponse | null;
+  extensionSettingsLoaded: boolean;
+  onReloadExtensions: () => void;
   projects: RegisteredProject[];
   projectsLoaded: boolean;
   onProjectSettingsChange: (projectId: string, settings: ProjectSettings) => void;
@@ -47,6 +60,7 @@ interface SettingsViewProps {
   onResetApplication: () => void;
   onClose: () => void;
   focusToken: number;
+  initialCategory?: SettingsCategoryId | null;
 }
 
 let lastSelectedDestinationKey = "category:general";
@@ -68,9 +82,14 @@ function projectSort(left: RegisteredProject, right: RegisteredProject) {
   return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
 }
 
-function sortedTilePickerConfigurationItems(visibility: TilePickerVisibility) {
-  return [...configurableTilePickerItems].sort((left, right) => {
-    const visibilityComparison = Number(visibility[right.id]) - Number(visibility[left.id]);
+function sortedTilePickerConfigurationItems(
+  items: ConfigurableTilePickerCatalogItem[],
+  visibility: TilePickerVisibility,
+) {
+  return [...items].sort((left, right) => {
+    const visibilityComparison =
+      Number(visibility[right.id] ?? right.defaultVisible) -
+      Number(visibility[left.id] ?? left.defaultVisible);
     if (visibilityComparison !== 0) return visibilityComparison;
 
     const titleComparison = left.title.localeCompare(right.title, undefined, {
@@ -85,7 +104,7 @@ function sortedTilePickerConfigurationItems(visibility: TilePickerVisibility) {
 function controlIdsForDestination(
   destination: Destination,
   project: RegisteredProject | null,
-  tilePickerItems = configurableTilePickerItems,
+  tilePickerItems = defaultConfigurableTilePickerItems,
 ) {
   if (destination.kind === "category") {
     if (destination.id === "general") return ["debug-layout", "reset-application"];
@@ -98,6 +117,7 @@ function controlIdsForDestination(
         ...tilePickerItems.map((item) => `tile-picker:${item.id}`),
       ];
     }
+    if (destination.id === "extensions") return ["extensions-reload"];
     return keyboardShortcutGroups.flatMap((group) =>
       group.shortcuts.map((shortcut) => shortcut.id),
     );
@@ -119,10 +139,14 @@ export function SettingsView({
   deletionPositiveStatColors,
   onDeletionPositiveStatColorsChange,
   tilePickerVisibility,
+  configurableTilePickerItems,
   toolAvailabilityByPickerItemId,
   toolAvailabilityLoaded,
   onTilePickerVisibilityChange,
   onRefreshToolAvailabilities,
+  extensionSettings,
+  extensionSettingsLoaded,
+  onReloadExtensions,
   projects,
   projectsLoaded,
   onProjectSettingsChange,
@@ -130,6 +154,7 @@ export function SettingsView({
   onResetApplication,
   onClose,
   focusToken,
+  initialCategory,
 }: SettingsViewProps) {
   const viewRef = useRef<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -139,8 +164,9 @@ export function SettingsView({
   );
   const [activeControlId, setActiveControlId] = useState("debug-layout");
   const [tilePickerQuery, setTilePickerQuery] = useState("");
-  const [tilePickerDisplayItems] = useState(() =>
-    sortedTilePickerConfigurationItems(tilePickerVisibility),
+  const tilePickerDisplayItems = useMemo(
+    () => sortedTilePickerConfigurationItems(configurableTilePickerItems, tilePickerVisibility),
+    [configurableTilePickerItems, tilePickerVisibility],
   );
   const [pendingReset, setPendingReset] = useState(false);
   const [pendingProjectRemovalId, setPendingProjectRemovalId] = useState<string | null>(null);
@@ -170,9 +196,12 @@ export function SettingsView({
   }, [tilePickerDisplayItems, tilePickerQuery]);
 
   useEffect(() => {
+    if (initialCategory) {
+      setSelectedDestination({ kind: "category", id: initialCategory });
+    }
     setFocusPane("left");
     viewRef.current?.focus();
-  }, [focusToken]);
+  }, [focusToken, initialCategory]);
 
   useEffect(() => {
     lastSelectedDestinationKey = destinationKey(selectedDestination);
@@ -279,6 +308,10 @@ export function SettingsView({
     }
     if (activeControlId === "tile-picker-refresh") {
       onRefreshToolAvailabilities();
+      return;
+    }
+    if (activeControlId === "extensions-reload") {
+      onReloadExtensions();
       return;
     }
     if (activeControlId === "tile-picker-search") {
@@ -478,6 +511,7 @@ export function SettingsView({
     if (selectedDestination.id === "general") return renderGeneralDetail();
     if (selectedDestination.id === "appearance") return renderAppearanceDetail();
     if (selectedDestination.id === "tiles") return renderTilesDetail();
+    if (selectedDestination.id === "extensions") return renderExtensionsDetail();
     return renderKeybindsDetail();
   }
 
@@ -620,7 +654,7 @@ export function SettingsView({
                   </span>
                   <span className="settings-row-control">
                     <Toggle
-                      checked={tilePickerVisibility[item.id]}
+                      checked={tilePickerVisibility[item.id] ?? item.defaultVisible}
                       ariaLabel={`Show ${item.title} in tile picker`}
                       onCheckedChange={(visible) => onTilePickerVisibilityChange(item.id, visible)}
                     />
@@ -635,6 +669,155 @@ export function SettingsView({
         </section>
       </div>
     );
+  }
+
+  function renderExtensionsDetail() {
+    const extensions = extensionSettings?.extensions ?? [];
+    const extensionDiagnostics = new Set(
+      extensions.flatMap((extension) => extension.diagnostics.map(extensionDiagnosticKey)),
+    );
+    const globalDiagnostics = (extensionSettings?.diagnostics ?? []).filter(
+      (diagnostic) => !extensionDiagnostics.has(extensionDiagnosticKey(diagnostic)),
+    );
+    return (
+      <div className="settings-detail-body settings-extensions-body">
+        <section
+          className="settings-inline-panel settings-detail-panel settings-extensions-panel"
+          aria-label="Extensions settings"
+        >
+          <div className="settings-inline-panel-header settings-extensions-header">
+            <span>
+              Inspect loaded Extension Definitions and diagnostics for the current Workspace scope.
+            </span>
+            <button
+              className={[
+                "settings-integration-refresh-button",
+                activeControlId === "extensions-reload" && focusPane === "right"
+                  ? "settings-button-active"
+                  : "",
+              ].join(" ")}
+              type="button"
+              onMouseEnter={() => setActiveControlId("extensions-reload")}
+              onClick={onReloadExtensions}
+            >
+              Reload Extensions
+            </button>
+          </div>
+          {!extensionSettingsLoaded ? (
+            <div className="settings-extension-empty">Loading extensions…</div>
+          ) : extensions.length === 0 ? (
+            <div className="settings-extension-empty">No Extensions found.</div>
+          ) : (
+            <div className="settings-extension-list">
+              {extensions.map((extension) => renderExtensionCard(extension))}
+            </div>
+          )}
+          {extensionSettingsLoaded && globalDiagnostics.length ? (
+            <div className="settings-extension-global-diagnostics">
+              {globalDiagnostics.map((diagnostic) => (
+                <div
+                  className={`settings-extension-diagnostic settings-extension-diagnostic-${diagnostic.severity}`}
+                  key={`${diagnostic.sourceKind}:${diagnostic.extensionId}:${diagnostic.message}`}
+                >
+                  {diagnostic.message}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
+  }
+
+  function extensionDiagnosticKey(diagnostic: ExtensionDiagnostic) {
+    return `${diagnostic.sourceKind}:${diagnostic.extensionId}:${diagnostic.message}`;
+  }
+
+  function renderExtensionCard(extension: ExtensionSettingsEntry) {
+    return (
+      <article
+        className={`settings-extension-card settings-extension-card-${extension.status}`}
+        key={`${extension.sourceKind}:${extension.projectId ?? "global"}:${extension.extensionId}:${extension.manifestPath ?? "core"}`}
+      >
+        <header className="settings-extension-card-header">
+          <span className="settings-extension-title">{extension.title}</span>
+          <span
+            className={`settings-extension-status settings-extension-status-${extension.status}`}
+          >
+            {extension.status}
+          </span>
+        </header>
+        <dl className="settings-extension-meta">
+          <div>
+            <dt>Source</dt>
+            <dd>{extensionSourceLabel(extension)}</dd>
+          </div>
+          <div>
+            <dt>Extension id</dt>
+            <dd>{extension.extensionId}</dd>
+          </div>
+          {extension.manifestPath ? (
+            <div>
+              <dt>Manifest</dt>
+              <dd title={extension.manifestPath}>{extension.manifestPath}</dd>
+            </div>
+          ) : null}
+          {extension.projectRoot ? (
+            <div>
+              <dt>Project</dt>
+              <dd title={extension.projectRoot}>{extension.projectRoot}</dd>
+            </div>
+          ) : null}
+        </dl>
+        <div className="settings-extension-subsection">
+          <span className="settings-extension-subtitle">Integration Tiles</span>
+          {extension.tiles.length ? (
+            <div className="settings-extension-tile-list">
+              {extension.tiles.map((tile) => (
+                <span
+                  className="settings-extension-tile"
+                  key={`${tile.integrationId}:${tile.integrationTileId}`}
+                >
+                  <span>{tile.title}</span>
+                  <code>
+                    {tile.integrationId}.{tile.integrationTileId}
+                  </code>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="settings-extension-muted">No contributed Integration Tiles.</span>
+          )}
+        </div>
+        <div className="settings-extension-subsection">
+          <span className="settings-extension-subtitle">Diagnostics</span>
+          {extension.diagnostics.length ? (
+            <div className="settings-extension-diagnostics">
+              {extension.diagnostics.map((diagnostic) => renderExtensionDiagnostic(diagnostic))}
+            </div>
+          ) : (
+            <span className="settings-extension-muted">No diagnostics.</span>
+          )}
+        </div>
+      </article>
+    );
+  }
+
+  function renderExtensionDiagnostic(diagnostic: ExtensionDiagnostic) {
+    return (
+      <div
+        className={`settings-extension-diagnostic settings-extension-diagnostic-${diagnostic.severity}`}
+        key={`${diagnostic.sourceKind}:${diagnostic.extensionId}:${diagnostic.message}`}
+      >
+        {diagnostic.message}
+      </div>
+    );
+  }
+
+  function extensionSourceLabel(extension: ExtensionSettingsEntry) {
+    if (extension.sourceKind === "core") return "Core Extension Pack";
+    if (extension.sourceKind === "global") return "Global Extension";
+    return "Project Extension";
   }
 
   function renderKeybindsDetail() {
@@ -819,7 +1002,7 @@ export function SettingsView({
     );
   }
 
-  function availabilityDetailForItem(item: (typeof configurableTilePickerItems)[number]) {
+  function availabilityDetailForItem(item: ConfigurableTilePickerCatalogItem) {
     if (item.kind !== "tool") return null;
     if (!toolAvailabilityLoaded) return "Checking availability…";
 

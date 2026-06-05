@@ -42,21 +42,21 @@ Mapped in [Integration Catalog Seams](integration-catalog-seams.md).
 ## 3. Design the Extension discovery and reload flow
 
 **Type:** HITL  
-**Blocked by:** Issue 1
+**Blocked by:** Issue 16
 
 ### What to build
 
-Design how Fluidity discovers User Extensions and Project Extensions, scopes Project Extension contributions, and reloads Extension Definitions manually.
+Design how Fluidity discovers Global Extensions and Project Extensions, scopes Project Extension contributions, and reloads Extension Definitions manually.
 
 ### Acceptance criteria
 
-- [ ] User Extensions are discovered under Fluidity's app data directory at `extensions/<extension-id>/fluidity.extension.json`.
-- [ ] Project Extensions are discovered under `.fluidity/extensions/<extension-id>/fluidity.extension.json` in the Project root.
-- [ ] Project Extension contributions are scoped to relevant Project Workspaces rather than globally loaded from every Registered Project.
-- [ ] Extension Reload is a manual Command and does not watch files automatically.
-- [ ] Reload changes available contributions, not existing Workspace Tile State.
-- [ ] Existing Integration Tiles whose contribution no longer resolves show a simple unavailable/broken message.
-- [ ] Running terminal sessions are not killed by Extension Reload.
+- [x] Global Extensions are discovered under Fluidity's app data directory at `extensions/<extension-id>/fluidity.extension.json`.
+- [x] Project Extensions are discovered under `.fluidity/extensions/<extension-id>/fluidity.extension.json` in the Project root.
+- [x] Project Extension contributions are scoped to relevant Project Workspaces rather than globally loaded from every Registered Project.
+- [x] Extension Reload is a manual Command and does not watch files automatically.
+- [x] Reload changes available contributions, not existing Workspace Tile State.
+- [x] Existing Integration Tiles whose contribution no longer resolves show a simple unavailable/broken message.
+- [x] Running terminal sessions are not killed by Extension Reload.
 
 ## 4. Prototype loading manifest-only Integration Tiles
 
@@ -69,11 +69,11 @@ Build a prototype that loads `fluidity.extension.json`, merges discovered contri
 
 ### Acceptance criteria
 
-- [ ] A valid User Extension Definition can add a command-backed Tool Tile to the tile picker.
-- [ ] A valid Project Extension Definition can add a command-backed Tool Tile for that Project's Workspaces.
-- [ ] The custom Tool Tile launches using the configured argv command.
-- [ ] Invalid Extension Definitions fail gracefully and do not prevent Fluidity from loading.
-- [ ] Extension contribution provenance is available for debugging and unavailable-state messaging.
+- [x] A valid Global Extension Definition can add a command-backed Tool Tile to the tile picker.
+- [x] A valid Project Extension Definition can add a command-backed Tool Tile for that Project's Workspaces.
+- [x] The custom Tool Tile launches using the configured argv command.
+- [x] Invalid Extension Definitions fail gracefully and do not prevent Fluidity from loading.
+- [x] Extension contribution provenance is available for debugging and unavailable-state messaging.
 
 ## 5. Persist and resolve Extension-provided Tiles safely
 
@@ -86,16 +86,16 @@ Update persisted Integration Tile identity and resolution so Tiles resolve by `e
 
 ### Acceptance criteria
 
-- [ ] Persisted Tool Tiles store Extension identity in addition to Integration and Integration Tile identity.
-- [ ] Existing bundled Integration Tiles migrate to `extensionId: "fluidity.core"`.
-- [ ] Tiles whose Extension contribution no longer resolves are preserved in Workspace Tile State.
-- [ ] Unresolved Tiles render a simple unavailable/broken message instead of silently becoming terminal tiles or disappearing.
-- [ ] Future launches/resumes use the updated Extension Definition when the identity still resolves.
+- [x] Persisted Tool Tiles store Extension identity in addition to Integration and Integration Tile identity.
+- [x] Existing bundled Integration Tiles migrate to `extensionId: "fluidity.core"`.
+- [x] Tiles whose Extension contribution no longer resolves are preserved in Workspace Tile State.
+- [x] Unresolved Tiles render a simple unavailable/broken message instead of silently becoming terminal tiles or disappearing.
+- [x] Future launches/resumes use the updated Extension Definition when the identity still resolves.
 
 ## 6. Draft the `fluidity-extensions` Skill requirements
 
 **Type:** AFK  
-**Blocked by:** Issues 1 and 3
+**Blocked by:** Issues 16 and 18
 
 ### What to build
 
@@ -103,17 +103,17 @@ Define the requirements and outline for the `fluidity-extensions` Skill that tea
 
 ### Acceptance criteria
 
-- [ ] The Skill scope is limited to Extension authoring rather than general Fluidity usage.
-- [ ] The Skill teaches User Extension and Project Extension locations.
-- [ ] The Skill teaches the v1 Extension Definition schema with examples.
-- [ ] The Skill explains Integration, Integration Tile, Extension Identity, and Extension Reload terminology.
-- [ ] The Skill includes troubleshooting guidance for unavailable/broken Tiles.
-- [ ] Fluidity docs show the install command `npx skills add owenps/fluidity-extensions` and do not run it automatically.
+- [x] The Skill scope is limited to Extension authoring rather than general Fluidity usage.
+- [x] The Skill teaches Global Extension and Project Extension locations.
+- [x] The Skill teaches the v1 Extension Definition schema with examples.
+- [x] The Skill explains Integration, Integration Tile, Extension Identity, and Extension Reload terminology.
+- [x] The Skill includes troubleshooting guidance for unavailable/broken Tiles.
+- [x] Fluidity docs show the install command `npx skills add owenps/fluidity-extensions` and do not run it automatically.
 
 ## 7. Research executable Extension module path
 
 **Type:** HITL  
-**Blocked by:** Issues 1 and 4
+**Blocked by:** Issues 16 and 19
 
 ### What to build
 
@@ -121,8 +121,10 @@ Research the future path from manifest-only Extension Definitions to executable 
 
 ### Acceptance criteria
 
-- [ ] Compare Fluidity's needs against Pi's arbitrary TypeScript extension model.
-- [ ] Identify which Extension Points would require executable code and which can remain manifest-only.
-- [ ] Propose a permission/trust model for User Extensions and Project Extensions.
-- [ ] Propose reload/lifecycle semantics for executable modules.
-- [ ] Document how executable modules would coexist with `fluidity.extension.json` rather than replacing it.
+Documented in [Executable Extension Modules Research](executable-extension-modules.md).
+
+- [x] Compare Fluidity's needs against Pi's arbitrary TypeScript extension model.
+- [x] Identify which Extension Points would require executable code and which can remain manifest-only.
+- [x] Propose a permission/trust model for Global Extensions and Project Extensions.
+- [x] Propose reload/lifecycle semantics for executable modules.
+- [x] Document how executable modules would coexist with `fluidity.extension.json` rather than replacing it.

@@ -6,7 +6,11 @@ import { Picker, type PickerItem } from "./Picker";
 import { APP_NAME } from "./appConstants";
 import { resetApplication } from "./applicationClient";
 import { SettingsView } from "./SettingsView";
-import { listToolAvailabilities } from "./integrationClient";
+import {
+  listExtensionSettings,
+  listIntegrationCatalog,
+  listToolAvailabilities,
+} from "./integrationClient";
 import { addProject, listProjects, removeProject } from "./projectClient";
 import { createDefaultAppSettings, type AppSettings } from "./settings";
 import { getAppSettings, updateAppSettings, updateProjectSettings } from "./settingsClient";
@@ -21,9 +25,13 @@ import { ToastStack, type AppToast, type ToastSeverity } from "./ToastStack";
 import { WorkspaceTile } from "./WorkspaceTile";
 import { createDefaultTiles, splitFocusedTile, type TileSplitDirection } from "./tileLayout";
 import {
+  createConfigurableTilePickerItems,
+  defaultConfigurableTilePickerItems,
   findTilePickerItem,
   findTilePickerItemForTile,
   getTilePickerItems,
+  integrationTilePickerItemId,
+  type ConfigurableTilePickerCatalogItem,
   type ConfigurableTilePickerItemId,
   type TilePickerCatalogItem,
 } from "./tilePickerCatalog";
@@ -32,6 +40,7 @@ import {
   GRID_ROWS,
   type CurrentWorkspaceResponse,
   type DirtyConfirmation,
+  type ExtensionSettingsResponse,
   type OpenWorkspaceSummary,
   type ProjectSettings,
   type RegisteredProject,
@@ -76,6 +85,7 @@ function terminalLaunchForTile(tile: Tile): TerminalLaunch {
   if (tile.kind === "tool") {
     return {
       kind: "tool",
+      extensionId: tile.extensionId,
       integrationId: tile.integrationId,
       integrationTileId: tile.integrationTileId,
       resume: tile.resume,
@@ -85,16 +95,49 @@ function terminalLaunchForTile(tile: Tile): TerminalLaunch {
   return { kind: "shell" };
 }
 
-function tileOptionsForCatalogItem(
-  catalogItem: TilePickerCatalogItem,
-):
+function toolTileResolves(tile: Tile, catalogItems: ConfigurableTilePickerCatalogItem[]): boolean {
+  if (tile.kind !== "tool") return true;
+  return catalogItems.some(
+    (item) =>
+      item.kind === "tool" &&
+      item.extensionId === tile.extensionId &&
+      item.integrationId === tile.integrationId &&
+      item.integrationTileId === tile.integrationTileId,
+  );
+}
+
+function integrationTileIdentity(tile: Tile): string {
+  if (tile.kind !== "tool") return tile.kind;
+  return `${tile.extensionId}:${tile.integrationId}.${tile.integrationTileId}`;
+}
+
+function UnavailableIntegrationTile({ tile }: { tile: Tile }) {
+  return (
+    <div className="tile-unavailable" role="status">
+      <strong>Integration Tile unavailable.</strong>
+      <span>
+        Fluidity could not find <code>{integrationTileIdentity(tile)}</code> for this Workspace.
+      </span>
+      <span>Restore the Extension Definition or run Reload Extensions after fixing it.</span>
+    </div>
+  );
+}
+
+function tileOptionsForCatalogItem(catalogItem: TilePickerCatalogItem):
   | { kind: "terminal"; title: string }
   | { kind: "workspace"; title: string }
-  | { kind: "tool"; title: string; integrationId: string; integrationTileId: string } {
+  | {
+      kind: "tool";
+      title: string;
+      extensionId: string;
+      integrationId: string;
+      integrationTileId: string;
+    } {
   if (catalogItem.kind === "tool") {
     return {
       kind: "tool",
       title: catalogItem.title,
+      extensionId: catalogItem.extensionId,
       integrationId: catalogItem.integrationId,
       integrationTileId: catalogItem.integrationTileId,
     };
@@ -122,13 +165,24 @@ export function App() {
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [settingsViewOpen, setSettingsViewOpen] = useState(false);
   const [settingsViewFocusToken, setSettingsViewFocusToken] = useState(0);
+  const [settingsViewInitialCategory, setSettingsViewInitialCategory] = useState<
+    "extensions" | null
+  >(null);
   const [openWorkspaces, setOpenWorkspaces] = useState<OpenWorkspaceSummary[]>([]);
   const [layoutMutationPreview, setLayoutMutationPreview] = useState(false);
   const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [toasts, setToasts] = useState<AppToast[]>([]);
+  const [configurableTilePickerItems, setConfigurableTilePickerItems] = useState<
+    ConfigurableTilePickerCatalogItem[]
+  >(defaultConfigurableTilePickerItems);
+  const [integrationCatalogLoaded, setIntegrationCatalogLoaded] = useState(false);
   const [toolAvailabilities, setToolAvailabilities] = useState<ToolAvailability[]>([]);
   const [toolAvailabilityLoaded, setToolAvailabilityLoaded] = useState(false);
+  const [extensionSettings, setExtensionSettings] = useState<ExtensionSettingsResponse | null>(
+    null,
+  );
+  const [extensionSettingsLoaded, setExtensionSettingsLoaded] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(() => createDefaultAppSettings());
   const {
     debugLayout,
@@ -301,9 +355,29 @@ export function App() {
     refreshProjects();
   }, [refreshProjects]);
 
+  const refreshIntegrationCatalog = useCallback(() => {
+    setIntegrationCatalogLoaded(false);
+    return listIntegrationCatalog({ workspaceId: currentWorkspaceId })
+      .then((catalog) => {
+        setConfigurableTilePickerItems(createConfigurableTilePickerItems(catalog.tiles));
+        setIntegrationCatalogLoaded(true);
+        catalog.diagnostics.forEach((diagnostic) => {
+          addToast({
+            severity: diagnostic.severity === "error" ? "error" : "info",
+            title: "Extension warning",
+            detail: diagnostic.message,
+          });
+        });
+      })
+      .catch(() => {
+        setConfigurableTilePickerItems(defaultConfigurableTilePickerItems);
+        setIntegrationCatalogLoaded(true);
+      });
+  }, [addToast, currentWorkspaceId]);
+
   const refreshToolAvailabilities = useCallback(() => {
     setToolAvailabilityLoaded(false);
-    void listToolAvailabilities()
+    return listToolAvailabilities({ workspaceId: currentWorkspaceId })
       .then((availabilities) => {
         setToolAvailabilities(availabilities);
         setToolAvailabilityLoaded(true);
@@ -312,23 +386,45 @@ export function App() {
         setToolAvailabilities([]);
         setToolAvailabilityLoaded(true);
       });
-  }, []);
+  }, [currentWorkspaceId]);
+
+  const refreshExtensionSettings = useCallback(() => {
+    setExtensionSettingsLoaded(false);
+    return listExtensionSettings({ workspaceId: currentWorkspaceId })
+      .then((settings) => {
+        setExtensionSettings(settings);
+        setExtensionSettingsLoaded(true);
+      })
+      .catch(() => {
+        setExtensionSettings({ extensions: [], diagnostics: [] });
+        setExtensionSettingsLoaded(true);
+      });
+  }, [currentWorkspaceId]);
 
   useEffect(() => {
-    refreshToolAvailabilities();
-  }, [refreshToolAvailabilities]);
+    void refreshIntegrationCatalog();
+    void refreshToolAvailabilities();
+    void refreshExtensionSettings();
+  }, [refreshExtensionSettings, refreshIntegrationCatalog, refreshToolAvailabilities]);
 
   useEffect(() => {
     if (tilePickerOpen || settingsViewOpen) {
-      refreshToolAvailabilities();
+      void refreshToolAvailabilities();
     }
-  }, [refreshToolAvailabilities, settingsViewOpen, tilePickerOpen]);
+    if (settingsViewOpen) {
+      void refreshExtensionSettings();
+    }
+  }, [refreshExtensionSettings, refreshToolAvailabilities, settingsViewOpen, tilePickerOpen]);
 
   const toolAvailabilityByPickerItemId = useMemo(
     () =>
       new Map(
         toolAvailabilities.map((availability) => [
-          `${availability.integrationId}.${availability.integrationTileId}`,
+          integrationTilePickerItemId(
+            availability.extensionId,
+            availability.integrationId,
+            availability.integrationTileId,
+          ),
           availability,
         ]),
       ),
@@ -434,6 +530,7 @@ export function App() {
     setTilePickerOpen(false);
     setWorkspacePickerOpen(false);
     setSettingsViewOpen(false);
+    setSettingsViewInitialCategory(null);
   }, []);
 
   const runResetApplication = useCallback(() => {
@@ -536,12 +633,23 @@ export function App() {
     runDiscardWorkspace(currentWorkspaceId);
   }, [currentWorkspaceDiscardable, currentWorkspaceId, runDiscardWorkspace]);
 
-  const openSettingsView = useCallback(() => {
+  const openSettingsView = useCallback((category?: "extensions") => {
+    setSettingsViewInitialCategory(category ?? null);
     setSettingsViewOpen(true);
     setSettingsViewFocusToken((token) => token + 1);
     setTilePickerOpen(false);
     setWorkspacePickerOpen(false);
   }, []);
+
+  const reloadExtensions = useCallback(() => {
+    void Promise.all([
+      refreshIntegrationCatalog(),
+      refreshToolAvailabilities(),
+      refreshExtensionSettings(),
+    ]).then(() => {
+      addToast({ severity: "success", title: "Extensions reloaded" });
+    });
+  }, [addToast, refreshExtensionSettings, refreshIntegrationCatalog, refreshToolAvailabilities]);
 
   const commandApi = useMemo<AppCommandApi>(
     () => ({
@@ -561,18 +669,31 @@ export function App() {
       openTilePicker: () => setTilePickerOpen(true),
       openWorkspacePicker: () => setWorkspacePickerOpen(true),
       openSettings: openSettingsView,
+      reloadExtensions,
       addProject: runAddProject,
       discardWorkspace: runDiscardCurrentWorkspace,
     }),
-    [openSettingsView, runAddProject, runDiscardCurrentWorkspace],
+    [openSettingsView, reloadExtensions, runAddProject, runDiscardCurrentWorkspace],
   );
 
   useEffect(() => {
     const unlistenFns: UnlistenFn[] = [];
 
-    void listen("app://open-settings", openSettingsView)
+    void listen("app://open-settings", () => openSettingsView())
       .then((unlistenSettingsEvent) => {
         unlistenFns.push(unlistenSettingsEvent);
+      })
+      .catch(() => {});
+
+    void listen("app://open-extensions", () => openSettingsView("extensions"))
+      .then((unlistenOpenExtensionsEvent) => {
+        unlistenFns.push(unlistenOpenExtensionsEvent);
+      })
+      .catch(() => {});
+
+    void listen("app://reload-extensions", reloadExtensions)
+      .then((unlistenReloadExtensionsEvent) => {
+        unlistenFns.push(unlistenReloadExtensionsEvent);
       })
       .catch(() => {});
 
@@ -595,7 +716,7 @@ export function App() {
       .catch(() => {});
 
     return () => unlistenFns.forEach((unlisten) => unlisten());
-  }, [openSettingsView, runAddProject, runDiscardCurrentWorkspace]);
+  }, [openSettingsView, reloadExtensions, runAddProject, runDiscardCurrentWorkspace]);
 
   useEffect(() => {
     if (!contextLoaded || !currentWorkspaceId) return;
@@ -697,7 +818,13 @@ export function App() {
     tileOptions:
       | { kind: "terminal"; title: string }
       | { kind: "workspace"; title: string }
-      | { kind: "tool"; title: string; integrationId: string; integrationTileId: string },
+      | {
+          kind: "tool";
+          title: string;
+          extensionId: string;
+          integrationId: string;
+          integrationTileId: string;
+        },
     splitDirection?: TileSplitDirection,
   ) => {
     const result = splitFocusedTile(
@@ -738,7 +865,7 @@ export function App() {
 
   const tilePickerItems = useMemo<PickerItem[]>(
     () =>
-      getTilePickerItems(tilePickerVisibility).map((item) => {
+      getTilePickerItems(configurableTilePickerItems, tilePickerVisibility).map((item) => {
         if (item.kind !== "tool") return item;
 
         const availability = toolAvailabilityByPickerItemId.get(item.id);
@@ -758,7 +885,12 @@ export function App() {
 
         return { ...item, disabled: true, detail: "Availability unknown" };
       }),
-    [tilePickerVisibility, toolAvailabilityByPickerItemId, toolAvailabilityLoaded],
+    [
+      configurableTilePickerItems,
+      tilePickerVisibility,
+      toolAvailabilityByPickerItemId,
+      toolAvailabilityLoaded,
+    ],
   );
   const workspacePickerItems = useMemo<PickerItem[]>(() => {
     const projects = [...registeredProjects].sort((left, right) => {
@@ -827,7 +959,7 @@ export function App() {
               const focused = tile.id === layout.focusedTileId;
               const focusMode = tile.id === layout.focusModeTileId;
               const hiddenByFocusMode = Boolean(layout.focusModeTileId && !focusMode);
-              const tilePickerItem = findTilePickerItemForTile(tile);
+              const tilePickerItem = findTilePickerItemForTile(configurableTilePickerItems, tile);
 
               return (
                 <article
@@ -880,6 +1012,11 @@ export function App() {
                         onSwitchWorkspace={runSwitchWorkspace}
                         onDiscardWorkspace={runDiscardWorkspace}
                       />
+                    ) : tile.kind === "tool" && !integrationCatalogLoaded ? (
+                      <div className="tile-placeholder">Loading Integration Tile…</div>
+                    ) : tile.kind === "tool" &&
+                      !toolTileResolves(tile, configurableTilePickerItems) ? (
+                      <UnavailableIntegrationTile tile={tile} />
                     ) : workspaceRoot ? (
                       <TerminalTile
                         workspaceId={currentWorkspaceId ?? ""}
@@ -922,10 +1059,14 @@ export function App() {
           deletionPositiveStatColors={deletionPositiveStatColors}
           onDeletionPositiveStatColorsChange={setDeletionPositiveStatColorsSetting}
           tilePickerVisibility={tilePickerVisibility}
+          configurableTilePickerItems={configurableTilePickerItems}
           toolAvailabilityByPickerItemId={toolAvailabilityByPickerItemId}
           toolAvailabilityLoaded={toolAvailabilityLoaded}
           onTilePickerVisibilityChange={setTilePickerItemVisibility}
-          onRefreshToolAvailabilities={refreshToolAvailabilities}
+          onRefreshToolAvailabilities={() => void refreshToolAvailabilities()}
+          extensionSettings={extensionSettings}
+          extensionSettingsLoaded={extensionSettingsLoaded}
+          onReloadExtensions={reloadExtensions}
           projects={registeredProjects}
           projectsLoaded={projectsLoaded}
           onProjectSettingsChange={setProjectSettings}
@@ -933,6 +1074,7 @@ export function App() {
           onResetApplication={runResetApplication}
           onClose={() => setSettingsViewOpen(false)}
           focusToken={settingsViewFocusToken}
+          initialCategory={settingsViewInitialCategory}
         />
       ) : null}
 
@@ -958,7 +1100,7 @@ export function App() {
           items={tilePickerItems}
           onClose={() => setTilePickerOpen(false)}
           onSelect={(item: PickerItem, options) => {
-            const catalogItem = findTilePickerItem(item.id);
+            const catalogItem = findTilePickerItem(configurableTilePickerItems, item.id);
             if (!catalogItem) return;
             createTile(tileOptionsForCatalogItem(catalogItem), options.splitDirection);
           }}

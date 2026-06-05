@@ -402,7 +402,13 @@ export type TileSplitDirection = Extract<Direction, "right" | "down">;
 type NewTileOptions =
   | { kind: "terminal"; title: string }
   | { kind: "workspace"; title: string }
-  | { kind: "tool"; title: string; integrationId: string; integrationTileId: string };
+  | {
+      kind: "tool";
+      title: string;
+      extensionId: string;
+      integrationId: string;
+      integrationTileId: string;
+    };
 
 const defaultNewTileOptions = { kind: "terminal", title: "Terminal" } as const;
 
@@ -471,6 +477,7 @@ function createTileFromOptions(
     return {
       ...base,
       kind: "tool",
+      extensionId: options.extensionId,
       integrationId: options.integrationId,
       integrationTileId: options.integrationTileId,
     };
@@ -488,6 +495,7 @@ function tileOptionsForClone(tile: Tile): NewTileOptions {
     return {
       kind: "tool",
       title: tile.title,
+      extensionId: tile.extensionId,
       integrationId: tile.integrationId,
       integrationTileId: tile.integrationTileId,
     };

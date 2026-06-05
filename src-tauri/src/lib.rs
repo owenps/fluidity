@@ -22,6 +22,10 @@ use uuid::Uuid;
 const APP_NAME: &str = "Fluidity";
 const OPEN_SETTINGS_MENU_ID: &str = "settings.open";
 const OPEN_SETTINGS_EVENT: &str = "app://open-settings";
+const OPEN_EXTENSIONS_MENU_ID: &str = "extensions.open";
+const OPEN_EXTENSIONS_EVENT: &str = "app://open-extensions";
+const RELOAD_EXTENSIONS_MENU_ID: &str = "extensions.reload";
+const RELOAD_EXTENSIONS_EVENT: &str = "app://reload-extensions";
 const ADD_PROJECT_MENU_ID: &str = "project.add";
 const ADD_PROJECT_EVENT: &str = "app://add-project";
 const NEW_WORKSPACE_MENU_ID: &str = "workspace.new";
@@ -30,6 +34,8 @@ const DISCARD_WORKSPACE_MENU_ID: &str = "workspace.discard";
 const DISCARD_WORKSPACE_EVENT: &str = "app://discard-workspace";
 const COMMANDS_MANIFEST_JSON: &str = include_str!("../../src/commandsManifest.json");
 const INTEGRATION_CATALOG_JSON: &str = include_str!("../../src/shared/integrationCatalog.json");
+const CORE_EXTENSION_ID: &str = "fluidity.core";
+const EXTENSION_DEFINITION_FILE: &str = "fluidity.extension.json";
 const APP_STATE_FILE: &str = "app-state.json";
 const APP_STATE_VERSION: u32 = 1;
 const GRID_COLUMNS: i32 = 12;
@@ -164,6 +170,8 @@ struct PersistedTile {
     kind: String,
     title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    extension_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     integration_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     integration_tile_id: Option<String>,
@@ -208,6 +216,7 @@ struct TerminalCreateRequest {
 #[serde(rename_all = "camelCase")]
 struct TerminalLaunchRequest {
     kind: String,
+    extension_id: Option<String>,
     integration_id: Option<String>,
     integration_tile_id: Option<String>,
     resume: Option<TileResumeMetadata>,
@@ -259,6 +268,7 @@ struct IntegrationCatalog {
 #[derive(Debug, Clone, Deserialize)]
 struct IntegrationCatalogIntegration {
     id: String,
+    title: String,
     tiles: Vec<IntegrationCatalogTile>,
 }
 
@@ -268,17 +278,86 @@ struct IntegrationCatalogTile {
     id: String,
     title: String,
     kind: String,
+    #[serde(default)]
+    default_visible: bool,
+    icon_key: Option<String>,
     tool_command: Option<String>,
     resume_provider: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 struct ToolIntegrationTile {
+    extension_id: String,
     integration_id: String,
     integration_tile_id: String,
     title: String,
-    tool_command: String,
-    resume_provider: String,
+    default_visible: bool,
+    icon: Option<ExtensionIcon>,
+    command_argv: Vec<String>,
+    resume: ToolResumeStrategy,
+    provenance: ExtensionContributionProvenance,
+}
+
+#[derive(Debug, Clone)]
+enum ToolResumeStrategy {
+    CoreProvider { provider: String },
+    None,
+    SessionIdArg { provider: String, arg: String },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionDefinition {
+    schema_version: u32,
+    id: String,
+    title: String,
+    icon: Option<ExtensionIcon>,
+    contributes: ExtensionContributes,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ExtensionContributes {
+    integrations: Vec<ExtensionIntegrationContribution>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ExtensionIntegrationContribution {
+    id: String,
+    title: String,
+    icon: Option<ExtensionIcon>,
+    tiles: Vec<ExtensionIntegrationTileContribution>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionIntegrationTileContribution {
+    id: String,
+    kind: String,
+    title: String,
+    #[serde(default)]
+    default_visible: bool,
+    icon: Option<ExtensionIcon>,
+    command: ExtensionCommand,
+    resume: Option<ExtensionResume>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum ExtensionIcon {
+    Key { key: String },
+    Path { path: String },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ExtensionCommand {
+    argv: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "strategy", rename_all = "kebab-case")]
+enum ExtensionResume {
+    None,
+    SessionIdArg { arg: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -292,6 +371,7 @@ enum ToolAvailabilityStatus {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ToolAvailabilityResponse {
+    extension_id: String,
     integration_id: String,
     integration_tile_id: String,
     title: String,
@@ -301,6 +381,114 @@ struct ToolAvailabilityResponse {
     resolved_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    provenance: ExtensionContributionProvenance,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IntegrationCatalogListRequest {
+    workspace_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolAvailabilityListRequest {
+    workspace_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionSettingsListRequest {
+    workspace_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionSettingsResponse {
+    extensions: Vec<ExtensionSettingsEntry>,
+    diagnostics: Vec<ExtensionDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionSettingsEntry {
+    source_kind: String,
+    extension_id: String,
+    title: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_root: Option<String>,
+    diagnostics: Vec<ExtensionDiagnostic>,
+    tiles: Vec<ExtensionSettingsTile>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionSettingsTile {
+    integration_id: String,
+    integration_tile_id: String,
+    title: String,
+    default_visible: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IntegrationCatalogResponse {
+    tiles: Vec<IntegrationCatalogTileResponse>,
+    diagnostics: Vec<ExtensionDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IntegrationCatalogTileResponse {
+    extension_id: String,
+    integration_id: String,
+    integration_tile_id: String,
+    title: String,
+    default_visible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<ExtensionIconResponse>,
+    provenance: ExtensionContributionProvenance,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum ExtensionIconResponse {
+    Key { key: String, fallback_text: String },
+    Path { path: String, fallback_text: String },
+    Text { fallback_text: String },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionContributionProvenance {
+    source_kind: String,
+    extension_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_root: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionDiagnostic {
+    severity: String,
+    message: String,
+    source_kind: String,
+    extension_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -910,7 +1098,8 @@ fn terminal_create(
 ) -> Result<TerminalCreateResponse, String> {
     let cwd = normalize_cwd(&workspace_state, &request.workspace_id, &request.cwd)?;
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let tool_tile = tool_integration_tile_for_launch(&request.launch)?;
+    let tool_tile =
+        tool_integration_tile_for_launch(&workspace_state, &request.workspace_id, &request.launch)?;
     if let Some(tool_tile) = &tool_tile {
         ensure_tool_available(&shell, tool_tile)?;
     }
@@ -936,12 +1125,48 @@ fn terminal_create(
 }
 
 #[tauri::command]
-fn integration_tool_availability_list() -> Result<Vec<ToolAvailabilityResponse>, String> {
+fn integration_catalog_list(
+    workspace_state: State<'_, WorkspaceState>,
+    request: IntegrationCatalogListRequest,
+) -> Result<IntegrationCatalogResponse, String> {
+    let snapshot =
+        extension_catalog_for_workspace(&workspace_state, request.workspace_id.as_deref());
+    Ok(IntegrationCatalogResponse {
+        tiles: snapshot
+            .tiles
+            .into_iter()
+            .map(integration_catalog_tile_response)
+            .collect(),
+        diagnostics: snapshot.diagnostics,
+    })
+}
+
+#[tauri::command]
+fn extension_settings_list(
+    workspace_state: State<'_, WorkspaceState>,
+    request: ExtensionSettingsListRequest,
+) -> Result<ExtensionSettingsResponse, String> {
+    let snapshot =
+        extension_catalog_for_workspace(&workspace_state, request.workspace_id.as_deref());
+    Ok(ExtensionSettingsResponse {
+        extensions: snapshot.extensions,
+        diagnostics: snapshot.diagnostics,
+    })
+}
+
+#[tauri::command]
+fn integration_tool_availability_list(
+    workspace_state: State<'_, WorkspaceState>,
+    request: ToolAvailabilityListRequest,
+) -> Result<Vec<ToolAvailabilityResponse>, String> {
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    Ok(tool_integration_tiles()
-        .into_iter()
-        .map(|tile| tool_availability_for_tile(&shell, &tile))
-        .collect())
+    Ok(
+        extension_catalog_for_workspace(&workspace_state, request.workspace_id.as_deref())
+            .tiles
+            .into_iter()
+            .map(|tile| tool_availability_for_tile(&shell, &tile))
+            .collect(),
+    )
 }
 
 #[tauri::command]
@@ -998,6 +1223,8 @@ pub fn run() {
             terminal_write,
             terminal_resize,
             terminal_close,
+            integration_catalog_list,
+            extension_settings_list,
             integration_tool_availability_list,
         ])
         .setup(|app| {
@@ -1009,6 +1236,12 @@ pub fn run() {
             app.on_menu_event(|app, event| {
                 if event.id() == OPEN_SETTINGS_MENU_ID {
                     let _ = app.emit(OPEN_SETTINGS_EVENT, ());
+                }
+                if event.id() == OPEN_EXTENSIONS_MENU_ID {
+                    let _ = app.emit(OPEN_EXTENSIONS_EVENT, ());
+                }
+                if event.id() == RELOAD_EXTENSIONS_MENU_ID {
+                    let _ = app.emit(RELOAD_EXTENSIONS_EVENT, ());
                 }
                 if event.id() == ADD_PROJECT_MENU_ID {
                     let _ = app.emit(ADD_PROJECT_EVENT, ());
@@ -1042,6 +1275,22 @@ fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         true,
         Some(NativeIcon::PreferencesGeneral),
         settings_accelerator.as_deref(),
+    )?;
+    let open_extensions = IconMenuItem::with_id_and_native_icon(
+        app,
+        OPEN_EXTENSIONS_MENU_ID,
+        "Open Extensions",
+        true,
+        Some(NativeIcon::PreferencesGeneral),
+        None::<&str>,
+    )?;
+    let reload_extensions = IconMenuItem::with_id_and_native_icon(
+        app,
+        RELOAD_EXTENSIONS_MENU_ID,
+        "Reload Extensions",
+        true,
+        None,
+        None::<&str>,
     )?;
     let add_project = IconMenuItem::with_id_and_native_icon(
         app,
@@ -1126,6 +1375,12 @@ fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
                     &PredefinedMenuItem::close_window(app, None)?,
                     &PredefinedMenuItem::quit(app, None)?,
                 ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Extensions",
+                true,
+                &[&open_extensions, &reload_extensions],
             )?,
             &Submenu::with_items(
                 app,
@@ -1379,6 +1634,7 @@ fn default_workspace_tile_state() -> WorkspaceTileState {
                 id: format!("tile-{}", Uuid::new_v4()),
                 kind: "terminal".to_string(),
                 title: "Terminal".to_string(),
+                extension_id: None,
                 integration_id: None,
                 integration_tile_id: None,
                 resume: None,
@@ -1393,6 +1649,7 @@ fn default_workspace_tile_state() -> WorkspaceTileState {
                 id: format!("tile-{}", Uuid::new_v4()),
                 kind: "workspace".to_string(),
                 title: "Workspaces".to_string(),
+                extension_id: None,
                 integration_id: None,
                 integration_tile_id: None,
                 resume: None,
@@ -1432,9 +1689,11 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
                 legacy_initial_command.as_deref(),
             ) {
                 tile.kind = "tool".to_string();
+                tile.extension_id = Some(tool_tile.extension_id);
                 tile.integration_id = Some(tool_tile.integration_id);
                 tile.integration_tile_id = Some(tool_tile.integration_tile_id);
             } else {
+                tile.extension_id = None;
                 tile.integration_id = None;
                 tile.integration_tile_id = None;
                 tile.resume = None;
@@ -1450,6 +1709,7 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
         }
 
         if tile.kind == "workspace" {
+            tile.extension_id = None;
             tile.integration_id = None;
             tile.integration_tile_id = None;
             tile.resume = None;
@@ -1461,21 +1721,28 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
         }
 
         if tile.kind == "tool" {
-            let Some(tool_tile) = tool_integration_tile_for_tile(&tile).or_else(|| {
+            if let Some(tool_tile) = tool_integration_tile_for_tile(&tile).or_else(|| {
                 legacy_tool_integration_tile(
                     legacy_tool_id.as_deref(),
                     legacy_initial_command.as_deref(),
                 )
-            }) else {
+            }) {
+                tile.extension_id = Some(tool_tile.extension_id);
+                tile.integration_id = Some(tool_tile.integration_id);
+                tile.integration_tile_id = Some(tool_tile.integration_tile_id);
+                if tile.title.trim().is_empty() {
+                    tile.title = tool_tile.title;
+                }
+                tiles.push(tile);
                 continue;
-            };
-
-            tile.integration_id = Some(tool_tile.integration_id);
-            tile.integration_tile_id = Some(tool_tile.integration_tile_id);
-            if tile.title.trim().is_empty() {
-                tile.title = tool_tile.title;
             }
-            tiles.push(tile);
+
+            if is_valid_persisted_tool_tile_identity(&tile) {
+                if tile.title.trim().is_empty() {
+                    tile.title = "Unavailable Integration Tile".to_string();
+                }
+                tiles.push(tile);
+            }
         }
     }
 
@@ -1484,6 +1751,20 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
     } else {
         WorkspaceTileState { tiles }
     }
+}
+
+fn is_valid_persisted_tool_tile_identity(tile: &PersistedTile) -> bool {
+    tile.extension_id
+        .as_deref()
+        .is_some_and(is_valid_extension_id)
+        && tile
+            .integration_id
+            .as_deref()
+            .is_some_and(is_valid_contribution_id)
+        && tile
+            .integration_tile_id
+            .as_deref()
+            .is_some_and(is_valid_contribution_id)
 }
 
 fn sanitize_resume_metadata(resume: Option<TileResumeMetadata>) -> Option<TileResumeMetadata> {
@@ -1499,7 +1780,7 @@ fn sanitize_resume_metadata(resume: Option<TileResumeMetadata>) -> Option<TileRe
 
 fn is_valid_resume_provider(provider: &str) -> bool {
     !provider.is_empty()
-        && provider.len() <= 64
+        && provider.len() <= 256
         && provider.bytes().all(|byte| {
             byte.is_ascii_lowercase()
                 || byte.is_ascii_digit()
@@ -1522,19 +1803,89 @@ fn integration_catalog() -> IntegrationCatalog {
         .expect("integration catalog should be valid JSON")
 }
 
-fn tool_integration_tiles() -> Vec<ToolIntegrationTile> {
+#[derive(Debug, Clone)]
+struct ExtensionCatalogSnapshot {
+    tiles: Vec<ToolIntegrationTile>,
+    diagnostics: Vec<ExtensionDiagnostic>,
+    extensions: Vec<ExtensionSettingsEntry>,
+}
+
+fn extension_catalog_for_workspace(
+    workspace_state: &WorkspaceState,
+    workspace_id: Option<&str>,
+) -> ExtensionCatalogSnapshot {
+    let core_tiles = core_tool_integration_tiles();
+    let mut snapshot = ExtensionCatalogSnapshot {
+        tiles: core_tiles.clone(),
+        diagnostics: Vec::new(),
+        extensions: vec![core_extension_settings_entry(&core_tiles)],
+    };
+
+    let global_root = workspace_state.app_data_dir.join("extensions");
+    load_extension_directory(&global_root, "global", None, None, &mut snapshot);
+
+    if let Some((project_id, project_root)) =
+        project_scope_for_workspace(workspace_state, workspace_id)
+    {
+        let project_root_path = PathBuf::from(&project_root)
+            .join(".fluidity")
+            .join("extensions");
+        load_extension_directory(
+            &project_root_path,
+            "project",
+            Some(project_id),
+            Some(project_root),
+            &mut snapshot,
+        );
+    }
+
+    snapshot
+}
+
+fn project_scope_for_workspace(
+    workspace_state: &WorkspaceState,
+    workspace_id: Option<&str>,
+) -> Option<(String, String)> {
+    let workspace_id = workspace_id?;
+    let app_state = workspace_state.app_state.lock().ok()?;
+    let workspace = app_state
+        .open_workspaces
+        .iter()
+        .find(|workspace| workspace.id == workspace_id)?;
+    let project = app_state
+        .projects
+        .iter()
+        .find(|project| project.id == workspace.project_id)?;
+    Some((project.id.clone(), project.root.clone()))
+}
+
+fn core_tool_integration_tiles() -> Vec<ToolIntegrationTile> {
+    let provenance = ExtensionContributionProvenance {
+        source_kind: "core".to_string(),
+        extension_id: CORE_EXTENSION_ID.to_string(),
+        manifest_path: None,
+        project_id: None,
+        project_root: None,
+    };
+
     integration_catalog()
         .integrations
         .into_iter()
         .flat_map(|integration| {
+            let integration_title = integration.title.clone();
             integration
                 .tiles
                 .into_iter()
-                .map(move |tile| (integration.id.clone(), tile))
+                .map(move |tile| (integration.id.clone(), integration_title.clone(), tile))
         })
-        .filter_map(|(integration_id, tile)| {
+        .filter_map(|(integration_id, integration_title, tile)| {
             if tile.kind == "tool" {
-                tool_integration_tile_from_catalog(integration_id, tile)
+                tool_integration_tile_from_core_catalog(
+                    integration_id,
+                    integration_title,
+                    tile,
+                    provenance.clone(),
+                )
             } else {
                 None
             }
@@ -1542,20 +1893,48 @@ fn tool_integration_tiles() -> Vec<ToolIntegrationTile> {
         .collect()
 }
 
+fn core_extension_settings_entry(tiles: &[ToolIntegrationTile]) -> ExtensionSettingsEntry {
+    ExtensionSettingsEntry {
+        source_kind: "core".to_string(),
+        extension_id: CORE_EXTENSION_ID.to_string(),
+        title: "Core Extension Pack".to_string(),
+        status: "loaded".to_string(),
+        manifest_path: None,
+        project_id: None,
+        project_root: None,
+        diagnostics: Vec::new(),
+        tiles: tiles
+            .iter()
+            .map(extension_settings_tile_from_tool_tile)
+            .collect(),
+    }
+}
+
 fn tool_integration_tile(
+    workspace_state: &WorkspaceState,
+    workspace_id: Option<&str>,
+    extension_id: &str,
     integration_id: &str,
     integration_tile_id: &str,
 ) -> Option<ToolIntegrationTile> {
-    tool_integration_tiles().into_iter().find(|tile| {
-        tile.integration_id == integration_id && tile.integration_tile_id == integration_tile_id
-    })
+    extension_catalog_for_workspace(workspace_state, workspace_id)
+        .tiles
+        .into_iter()
+        .find(|tile| {
+            tile.extension_id == extension_id
+                && tile.integration_id == integration_id
+                && tile.integration_tile_id == integration_tile_id
+        })
 }
 
 fn tool_integration_tile_for_tile(tile: &PersistedTile) -> Option<ToolIntegrationTile> {
-    tool_integration_tile(
-        tile.integration_id.as_deref()?,
-        tile.integration_tile_id.as_deref()?,
-    )
+    let extension_id = tile.extension_id.as_deref().unwrap_or(CORE_EXTENSION_ID);
+    core_tool_integration_tiles().into_iter().find(|candidate| {
+        candidate.extension_id == extension_id
+            && candidate.integration_id == tile.integration_id.as_deref().unwrap_or_default()
+            && candidate.integration_tile_id
+                == tile.integration_tile_id.as_deref().unwrap_or_default()
+    })
 }
 
 fn legacy_tool_integration_tile(
@@ -1563,37 +1942,455 @@ fn legacy_tool_integration_tile(
     legacy_initial_command: Option<&str>,
 ) -> Option<ToolIntegrationTile> {
     let legacy_id = legacy_tool_id.or(legacy_initial_command)?;
-    integration_catalog()
-        .integrations
+    core_tool_integration_tiles()
         .into_iter()
-        .flat_map(|integration| {
-            integration
-                .tiles
-                .into_iter()
-                .map(move |tile| (integration.id.clone(), tile))
+        .find(|tile| {
+            tile.command_argv.first().is_some_and(|command| command == legacy_id)
+                || matches!(&tile.resume, ToolResumeStrategy::CoreProvider { provider } if provider == legacy_id)
         })
-        .filter_map(|(integration_id, tile)| {
-            tool_integration_tile_from_catalog(integration_id, tile)
-        })
-        .find(|tile| tile.tool_command == legacy_id || tile.resume_provider == legacy_id)
 }
 
-fn tool_integration_tile_from_catalog(
+fn tool_integration_tile_from_core_catalog(
     integration_id: String,
+    _integration_title: String,
     tile: IntegrationCatalogTile,
+    provenance: ExtensionContributionProvenance,
 ) -> Option<ToolIntegrationTile> {
     let tool_command = tile.tool_command?;
+    let resume_provider = tile.resume_provider.unwrap_or_else(|| tool_command.clone());
     Some(ToolIntegrationTile {
+        extension_id: CORE_EXTENSION_ID.to_string(),
         integration_id,
         integration_tile_id: tile.id,
         title: tile.title,
-        resume_provider: tile.resume_provider.unwrap_or_else(|| tool_command.clone()),
-        tool_command,
+        default_visible: tile.default_visible,
+        icon: tile.icon_key.map(|key| ExtensionIcon::Key { key }),
+        command_argv: vec![tool_command],
+        resume: ToolResumeStrategy::CoreProvider {
+            provider: resume_provider,
+        },
+        provenance,
     })
 }
 
+fn load_extension_directory(
+    root: &Path,
+    source_kind: &str,
+    project_id: Option<String>,
+    project_root: Option<String>,
+    snapshot: &mut ExtensionCatalogSnapshot,
+) {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => {
+            snapshot.diagnostics.push(extension_diagnostic(
+                "error",
+                format!(
+                    "Could not read Extension directory {}: {}",
+                    root.display(),
+                    error
+                ),
+                source_kind,
+                "unknown",
+                Some(root.to_string_lossy().to_string()),
+                project_id,
+                project_root,
+            ));
+            return;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let extension_dir_name = entry.file_name().to_string_lossy().to_string();
+        let manifest_path = path.join(EXTENSION_DEFINITION_FILE);
+        if !manifest_path.is_file() {
+            continue;
+        }
+        load_extension_definition(
+            &manifest_path,
+            &extension_dir_name,
+            source_kind,
+            project_id.clone(),
+            project_root.clone(),
+            snapshot,
+        );
+    }
+}
+
+fn extension_settings_entry(
+    source_kind: &str,
+    extension_id: &str,
+    title: &str,
+    status: &str,
+    manifest_path: Option<String>,
+    project_id: Option<String>,
+    project_root: Option<String>,
+    diagnostics: Vec<ExtensionDiagnostic>,
+    tiles: Vec<ExtensionSettingsTile>,
+) -> ExtensionSettingsEntry {
+    ExtensionSettingsEntry {
+        source_kind: source_kind.to_string(),
+        extension_id: extension_id.to_string(),
+        title: if title.trim().is_empty() {
+            extension_id.to_string()
+        } else {
+            title.to_string()
+        },
+        status: status.to_string(),
+        manifest_path,
+        project_id,
+        project_root,
+        diagnostics,
+        tiles,
+    }
+}
+
+fn load_extension_definition(
+    manifest_path: &Path,
+    extension_dir_name: &str,
+    source_kind: &str,
+    project_id: Option<String>,
+    project_root: Option<String>,
+    snapshot: &mut ExtensionCatalogSnapshot,
+) {
+    let manifest_path_string = manifest_path.to_string_lossy().to_string();
+    let bytes = match fs::read(manifest_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let diagnostic = extension_diagnostic(
+                "error",
+                format!(
+                    "Could not read Extension Definition {}: {}",
+                    manifest_path.display(),
+                    error
+                ),
+                source_kind,
+                extension_dir_name,
+                Some(manifest_path_string.clone()),
+                project_id.clone(),
+                project_root.clone(),
+            );
+            snapshot.diagnostics.push(diagnostic.clone());
+            snapshot.extensions.push(extension_settings_entry(
+                source_kind,
+                extension_dir_name,
+                extension_dir_name,
+                "invalid",
+                Some(manifest_path_string),
+                project_id,
+                project_root,
+                vec![diagnostic],
+                Vec::new(),
+            ));
+            return;
+        }
+    };
+
+    let definition = match serde_json::from_slice::<ExtensionDefinition>(&bytes) {
+        Ok(definition) => definition,
+        Err(error) => {
+            let diagnostic = extension_diagnostic(
+                "error",
+                format!(
+                    "Invalid Extension Definition {}: {}",
+                    manifest_path.display(),
+                    error
+                ),
+                source_kind,
+                extension_dir_name,
+                Some(manifest_path_string.clone()),
+                project_id.clone(),
+                project_root.clone(),
+            );
+            snapshot.diagnostics.push(diagnostic.clone());
+            snapshot.extensions.push(extension_settings_entry(
+                source_kind,
+                extension_dir_name,
+                extension_dir_name,
+                "invalid",
+                Some(manifest_path_string),
+                project_id,
+                project_root,
+                vec![diagnostic],
+                Vec::new(),
+            ));
+            return;
+        }
+    };
+
+    if let Err(message) = validate_extension_definition(&definition, extension_dir_name) {
+        let diagnostic = extension_diagnostic(
+            "error",
+            format!(
+                "Invalid Extension Definition {}: {}",
+                manifest_path.display(),
+                message
+            ),
+            source_kind,
+            &definition.id,
+            Some(manifest_path_string.clone()),
+            project_id.clone(),
+            project_root.clone(),
+        );
+        snapshot.diagnostics.push(diagnostic.clone());
+        snapshot.extensions.push(extension_settings_entry(
+            source_kind,
+            &definition.id,
+            &definition.title,
+            "invalid",
+            Some(manifest_path_string),
+            project_id,
+            project_root,
+            vec![diagnostic],
+            Vec::new(),
+        ));
+        return;
+    }
+
+    if snapshot
+        .tiles
+        .iter()
+        .any(|tile| tile.extension_id == definition.id)
+    {
+        let diagnostic = extension_diagnostic(
+            "error",
+            format!(
+                "Extension `{}` is already loaded in this scope; skipping duplicate",
+                definition.id
+            ),
+            source_kind,
+            &definition.id,
+            Some(manifest_path_string.clone()),
+            project_id.clone(),
+            project_root.clone(),
+        );
+        snapshot.diagnostics.push(diagnostic.clone());
+        snapshot.extensions.push(extension_settings_entry(
+            source_kind,
+            &definition.id,
+            &definition.title,
+            "skipped",
+            Some(manifest_path_string),
+            project_id,
+            project_root,
+            vec![diagnostic],
+            Vec::new(),
+        ));
+        return;
+    }
+
+    let provenance = ExtensionContributionProvenance {
+        source_kind: source_kind.to_string(),
+        extension_id: definition.id.clone(),
+        manifest_path: Some(manifest_path_string.clone()),
+        project_id,
+        project_root,
+    };
+    let mut extension_diagnostics = Vec::new();
+    let mut extension_tiles = Vec::new();
+
+    for integration in definition.contributes.integrations {
+        for tile in integration.tiles {
+            let duplicate = snapshot.tiles.iter().any(|existing| {
+                existing.extension_id == definition.id
+                    && existing.integration_id == integration.id
+                    && existing.integration_tile_id == tile.id
+            });
+            if duplicate {
+                let diagnostic = extension_diagnostic(
+                    "error",
+                    format!(
+                        "Duplicate Integration Tile Contribution `{}:{}.{}`; skipping duplicate",
+                        definition.id, integration.id, tile.id
+                    ),
+                    source_kind,
+                    &definition.id,
+                    Some(manifest_path_string.clone()),
+                    provenance.project_id.clone(),
+                    provenance.project_root.clone(),
+                );
+                snapshot.diagnostics.push(diagnostic.clone());
+                extension_diagnostics.push(diagnostic);
+                continue;
+            }
+
+            let resume = match tile.resume.unwrap_or(ExtensionResume::None) {
+                ExtensionResume::None => ToolResumeStrategy::None,
+                ExtensionResume::SessionIdArg { arg } => ToolResumeStrategy::SessionIdArg {
+                    provider: extension_resume_provider(&definition.id, &integration.id, &tile.id),
+                    arg,
+                },
+            };
+            let icon = tile
+                .icon
+                .or_else(|| integration.icon.clone())
+                .or_else(|| definition.icon.clone());
+            let tool_tile = ToolIntegrationTile {
+                extension_id: definition.id.clone(),
+                integration_id: integration.id.clone(),
+                integration_tile_id: tile.id,
+                title: tile.title,
+                default_visible: tile.default_visible,
+                icon,
+                command_argv: tile.command.argv,
+                resume,
+                provenance: provenance.clone(),
+            };
+            extension_tiles.push(extension_settings_tile_from_tool_tile(&tool_tile));
+            snapshot.tiles.push(tool_tile);
+        }
+    }
+
+    snapshot.extensions.push(extension_settings_entry(
+        source_kind,
+        &definition.id,
+        &definition.title,
+        "loaded",
+        Some(manifest_path_string),
+        provenance.project_id,
+        provenance.project_root,
+        extension_diagnostics,
+        extension_tiles,
+    ));
+}
+
+fn validate_extension_definition(
+    definition: &ExtensionDefinition,
+    extension_dir_name: &str,
+) -> Result<(), String> {
+    if definition.schema_version != 1 {
+        return Err("schemaVersion must be 1".to_string());
+    }
+    if definition.id == CORE_EXTENSION_ID {
+        return Err(format!(
+            "{} is reserved for the Core Extension Pack",
+            CORE_EXTENSION_ID
+        ));
+    }
+    if definition.id != extension_dir_name {
+        return Err(format!(
+            "Extension directory `{}` must match Extension id `{}`",
+            extension_dir_name, definition.id
+        ));
+    }
+    if !is_valid_extension_id(&definition.id) {
+        return Err(format!("invalid Extension id `{}`", definition.id));
+    }
+    if definition.title.trim().is_empty() {
+        return Err("Extension title must not be empty".to_string());
+    }
+    if definition.contributes.integrations.is_empty() {
+        return Err("contributes.integrations must not be empty".to_string());
+    }
+
+    for integration in &definition.contributes.integrations {
+        if !is_valid_contribution_id(&integration.id) {
+            return Err(format!("invalid Integration id `{}`", integration.id));
+        }
+        if integration.title.trim().is_empty() {
+            return Err(format!(
+                "Integration `{}` title must not be empty",
+                integration.id
+            ));
+        }
+        if integration.tiles.is_empty() {
+            return Err(format!(
+                "Integration `{}` must include at least one Tile",
+                integration.id
+            ));
+        }
+        for tile in &integration.tiles {
+            if !is_valid_contribution_id(&tile.id) {
+                return Err(format!("invalid Integration Tile id `{}`", tile.id));
+            }
+            if tile.kind != "tool" {
+                return Err(format!(
+                    "Integration Tile `{}` kind must be `tool`",
+                    tile.id
+                ));
+            }
+            if tile.title.trim().is_empty() {
+                return Err(format!(
+                    "Integration Tile `{}` title must not be empty",
+                    tile.id
+                ));
+            }
+            if tile.command.argv.is_empty() {
+                return Err(format!(
+                    "Integration Tile `{}` command.argv must not be empty",
+                    tile.id
+                ));
+            }
+            for arg in &tile.command.argv {
+                if arg.is_empty() || arg.contains('\0') || arg.contains('\n') || arg.contains('\r')
+                {
+                    return Err(format!(
+                        "Integration Tile `{}` command.argv contains an invalid argv entry",
+                        tile.id
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn extension_settings_tile_from_tool_tile(tile: &ToolIntegrationTile) -> ExtensionSettingsTile {
+    ExtensionSettingsTile {
+        integration_id: tile.integration_id.clone(),
+        integration_tile_id: tile.integration_tile_id.clone(),
+        title: tile.title.clone(),
+        default_visible: tile.default_visible,
+    }
+}
+
+fn integration_catalog_tile_response(tile: ToolIntegrationTile) -> IntegrationCatalogTileResponse {
+    IntegrationCatalogTileResponse {
+        extension_id: tile.extension_id,
+        integration_id: tile.integration_id,
+        integration_tile_id: tile.integration_tile_id,
+        title: tile.title.clone(),
+        default_visible: tile.default_visible,
+        icon: Some(extension_icon_response(tile.icon, &tile.title)),
+        provenance: tile.provenance,
+    }
+}
+
+fn extension_icon_response(
+    icon: Option<ExtensionIcon>,
+    fallback_title: &str,
+) -> ExtensionIconResponse {
+    let fallback_text = fallback_icon_text(fallback_title);
+    match icon {
+        Some(ExtensionIcon::Key { key }) if is_first_party_icon_key(&key) => {
+            ExtensionIconResponse::Key { key, fallback_text }
+        }
+        Some(ExtensionIcon::Path { path }) => ExtensionIconResponse::Path {
+            path,
+            fallback_text,
+        },
+        _ => ExtensionIconResponse::Text { fallback_text },
+    }
+}
+
+fn fallback_icon_text(title: &str) -> String {
+    title
+        .split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .take(2)
+        .collect::<String>()
+        .to_uppercase()
+}
+
 fn tool_availability_for_tile(shell: &str, tile: &ToolIntegrationTile) -> ToolAvailabilityResponse {
-    let check_command = format!("command -v {}", shell_escape_arg(&tile.tool_command));
+    let command = tile.command_argv.first().cloned().unwrap_or_default();
+    let check_command = format!("command -v {}", shell_escape_arg(&command));
     match Command::new(shell).arg("-lc").arg(check_command).output() {
         Ok(output) => {
             let resolved_path = String::from_utf8_lossy(&output.stdout)
@@ -1605,21 +2402,24 @@ fn tool_availability_for_tile(shell: &str, tile: &ToolIntegrationTile) -> ToolAv
 
             if output.status.success() && resolved_path.is_some() {
                 ToolAvailabilityResponse {
+                    extension_id: tile.extension_id.clone(),
                     integration_id: tile.integration_id.clone(),
                     integration_tile_id: tile.integration_tile_id.clone(),
                     title: tile.title.clone(),
-                    command: tile.tool_command.clone(),
+                    command,
                     status: ToolAvailabilityStatus::Available,
                     resolved_path,
                     detail: None,
+                    provenance: tile.provenance.clone(),
                 }
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                 ToolAvailabilityResponse {
+                    extension_id: tile.extension_id.clone(),
                     integration_id: tile.integration_id.clone(),
                     integration_tile_id: tile.integration_tile_id.clone(),
                     title: tile.title.clone(),
-                    command: tile.tool_command.clone(),
+                    command,
                     status: ToolAvailabilityStatus::Unavailable,
                     resolved_path: None,
                     detail: if stderr.is_empty() {
@@ -1627,28 +2427,32 @@ fn tool_availability_for_tile(shell: &str, tile: &ToolIntegrationTile) -> ToolAv
                     } else {
                         Some(stderr)
                     },
+                    provenance: tile.provenance.clone(),
                 }
             }
         }
         Err(error) => ToolAvailabilityResponse {
+            extension_id: tile.extension_id.clone(),
             integration_id: tile.integration_id.clone(),
             integration_tile_id: tile.integration_tile_id.clone(),
             title: tile.title.clone(),
-            command: tile.tool_command.clone(),
+            command,
             status: ToolAvailabilityStatus::Unknown,
             resolved_path: None,
             detail: Some(error.to_string()),
+            provenance: tile.provenance.clone(),
         },
     }
 }
 
 fn ensure_tool_available(shell: &str, tile: &ToolIntegrationTile) -> Result<(), String> {
     let availability = tool_availability_for_tile(shell, tile);
+    let command = tile.command_argv.first().cloned().unwrap_or_default();
     match availability.status {
         ToolAvailabilityStatus::Available => Ok(()),
         ToolAvailabilityStatus::Unavailable => Err(format!(
             "{} CLI is not installed or is not on Fluidity's PATH. Install `{}` and try again.",
-            tile.title, tile.tool_command
+            tile.title, command
         )),
         ToolAvailabilityStatus::Unknown => Err(format!(
             "Fluidity could not verify whether the {} CLI is installed. {}",
@@ -1658,6 +2462,66 @@ fn ensure_tool_available(shell: &str, tile: &ToolIntegrationTile) -> Result<(), 
             })
         )),
     }
+}
+
+fn extension_diagnostic(
+    severity: &str,
+    message: String,
+    source_kind: &str,
+    extension_id: &str,
+    manifest_path: Option<String>,
+    project_id: Option<String>,
+    project_root: Option<String>,
+) -> ExtensionDiagnostic {
+    ExtensionDiagnostic {
+        severity: severity.to_string(),
+        message,
+        source_kind: source_kind.to_string(),
+        extension_id: extension_id.to_string(),
+        manifest_path,
+        project_id,
+        project_root,
+    }
+}
+
+fn extension_resume_provider(extension_id: &str, integration_id: &str, tile_id: &str) -> String {
+    format!("{}.{}.{}", extension_id, integration_id, tile_id)
+}
+
+fn is_first_party_icon_key(key: &str) -> bool {
+    matches!(key, "claude" | "codex" | "gemini" | "opencode" | "pi")
+}
+
+fn is_valid_extension_id(id: &str) -> bool {
+    is_valid_segmented_id(id, 3, 128, b".-")
+}
+
+fn is_valid_contribution_id(id: &str) -> bool {
+    is_valid_segmented_id(id, 1, 64, b"._-")
+}
+
+fn is_valid_segmented_id(id: &str, min_len: usize, max_len: usize, separators: &[u8]) -> bool {
+    if id.len() < min_len || id.len() > max_len {
+        return false;
+    }
+
+    let bytes = id.as_bytes();
+    if !bytes[0].is_ascii_lowercase() {
+        return false;
+    }
+    let mut previous_was_separator = false;
+    for byte in bytes {
+        let separator = separators.contains(byte);
+        if separator && previous_was_separator {
+            return false;
+        }
+        if !(byte.is_ascii_lowercase() || byte.is_ascii_digit() || separator) {
+            return false;
+        }
+        previous_was_separator = separator;
+    }
+
+    !previous_was_separator
 }
 
 fn is_valid_tile_geometry(tile: &PersistedTile) -> bool {
@@ -2270,27 +3134,94 @@ struct TerminalLaunchPlan {
 
 #[cfg(test)]
 fn terminal_launch_plan(launch: &TerminalLaunchRequest) -> Result<TerminalLaunchPlan, String> {
-    let tool_tile = tool_integration_tile_for_launch(launch)?;
+    let tool_tile = tool_integration_tile_for_launch_without_project_scope(launch)?;
     terminal_launch_plan_for_resolved_tool(launch, tool_tile.as_ref())
 }
 
-fn tool_integration_tile_for_launch(
+#[cfg(test)]
+fn tool_integration_tile_for_launch_without_project_scope(
     launch: &TerminalLaunchRequest,
 ) -> Result<Option<ToolIntegrationTile>, String> {
     if launch.kind != "tool" {
         return Ok(None);
     }
 
-    launch
+    let extension_id = launch.extension_id.as_deref().unwrap_or(CORE_EXTENSION_ID);
+    if let Some((integration_id, integration_tile_id)) = launch
         .integration_id
         .as_deref()
         .zip(launch.integration_tile_id.as_deref())
-        .and_then(|(integration_id, integration_tile_id)| {
-            tool_integration_tile(integration_id, integration_tile_id)
-        })
-        .or_else(|| legacy_tool_integration_tile(launch.tool_id.as_deref(), None))
+    {
+        if let Some(tile) = core_tool_integration_tiles().into_iter().find(|tile| {
+            tile.extension_id == extension_id
+                && tile.integration_id == integration_id
+                && tile.integration_tile_id == integration_tile_id
+        }) {
+            return Ok(Some(tile));
+        }
+        if let Some(tile) = legacy_tool_integration_tile(launch.tool_id.as_deref(), None) {
+            return Ok(Some(tile));
+        }
+        return Err(unresolved_integration_tile_error(
+            extension_id,
+            integration_id,
+            integration_tile_id,
+        ));
+    }
+
+    legacy_tool_integration_tile(launch.tool_id.as_deref(), None)
         .map(Some)
         .ok_or_else(|| "unsupported integration tile".to_string())
+}
+
+fn tool_integration_tile_for_launch(
+    workspace_state: &WorkspaceState,
+    workspace_id: &str,
+    launch: &TerminalLaunchRequest,
+) -> Result<Option<ToolIntegrationTile>, String> {
+    if launch.kind != "tool" {
+        return Ok(None);
+    }
+
+    let extension_id = launch.extension_id.as_deref().unwrap_or(CORE_EXTENSION_ID);
+    if let Some((integration_id, integration_tile_id)) = launch
+        .integration_id
+        .as_deref()
+        .zip(launch.integration_tile_id.as_deref())
+    {
+        if let Some(tile) = tool_integration_tile(
+            workspace_state,
+            Some(workspace_id),
+            extension_id,
+            integration_id,
+            integration_tile_id,
+        ) {
+            return Ok(Some(tile));
+        }
+        if let Some(tile) = legacy_tool_integration_tile(launch.tool_id.as_deref(), None) {
+            return Ok(Some(tile));
+        }
+        return Err(unresolved_integration_tile_error(
+            extension_id,
+            integration_id,
+            integration_tile_id,
+        ));
+    }
+
+    legacy_tool_integration_tile(launch.tool_id.as_deref(), None)
+        .map(Some)
+        .ok_or_else(|| "unsupported integration tile".to_string())
+}
+
+fn unresolved_integration_tile_error(
+    extension_id: &str,
+    integration_id: &str,
+    integration_tile_id: &str,
+) -> String {
+    format!(
+        "Integration Tile unavailable. Fluidity could not find `{}:{}.{}` for this Workspace. Restore the Extension Definition or run Reload Extensions after fixing it.",
+        extension_id, integration_id, integration_tile_id
+    )
 }
 
 fn terminal_launch_plan_for_resolved_tool(
@@ -2309,28 +3240,54 @@ fn terminal_launch_plan_for_resolved_tool(
         .clone()
         .and_then(|resume| sanitize_resume_metadata(Some(resume)));
 
-    if let Some(resume) =
-        existing_resume.filter(|resume| resume.provider == tool_tile.resume_provider)
-    {
-        return Ok(TerminalLaunchPlan {
-            shell_command: Some(resume_tool_shell_command(&tool_tile.tool_command, &resume)),
-            assigned_resume: None,
-        });
-    }
+    match &tool_tile.resume {
+        ToolResumeStrategy::CoreProvider { provider } => {
+            if let Some(resume) = existing_resume.filter(|resume| resume.provider == *provider) {
+                return Ok(TerminalLaunchPlan {
+                    shell_command: Some(resume_tool_shell_command(provider, &resume)),
+                    assigned_resume: None,
+                });
+            }
 
-    if launch.resume.is_none() {
-        if let Some(resume) = new_preassigned_resume(&tool_tile.resume_provider) {
-            return Ok(TerminalLaunchPlan {
-                shell_command: Some(new_tool_shell_command(&tool_tile.tool_command, &resume)),
-                assigned_resume: Some(resume),
-            });
+            if launch.resume.is_none() {
+                if let Some(resume) = new_preassigned_resume(provider) {
+                    return Ok(TerminalLaunchPlan {
+                        shell_command: Some(new_tool_shell_command(provider, &resume)),
+                        assigned_resume: Some(resume),
+                    });
+                }
+            }
+        }
+        ToolResumeStrategy::None => {}
+        ToolResumeStrategy::SessionIdArg { provider, arg } => {
+            if let Some(resume) = existing_resume.filter(|resume| resume.provider == *provider) {
+                let mut args = tool_tile.command_argv.clone();
+                args.push(arg.clone());
+                args.push(resume.identifier);
+                return Ok(TerminalLaunchPlan {
+                    shell_command: Some(shell_command_from_args(args)),
+                    assigned_resume: None,
+                });
+            }
+
+            if launch.resume.is_none() {
+                let resume = TileResumeMetadata {
+                    provider: provider.clone(),
+                    identifier: Uuid::new_v4().to_string(),
+                };
+                let mut args = tool_tile.command_argv.clone();
+                args.push(arg.clone());
+                args.push(resume.identifier.clone());
+                return Ok(TerminalLaunchPlan {
+                    shell_command: Some(shell_command_from_args(args)),
+                    assigned_resume: Some(resume),
+                });
+            }
         }
     }
 
     Ok(TerminalLaunchPlan {
-        shell_command: Some(shell_command_from_args(vec![tool_tile
-            .tool_command
-            .clone()])),
+        shell_command: Some(shell_command_from_args(tool_tile.command_argv.clone())),
         assigned_resume: None,
     })
 }
@@ -2524,11 +3481,21 @@ mod tests {
     #[test]
     fn tool_availability_reports_missing_commands_as_unavailable() {
         let tile = ToolIntegrationTile {
+            extension_id: "example.missing".to_string(),
             integration_id: "missing".to_string(),
             integration_tile_id: "cli".to_string(),
             title: "Missing".to_string(),
-            tool_command: "__fluidity_missing_command__".to_string(),
-            resume_provider: "missing".to_string(),
+            default_visible: false,
+            icon: None,
+            command_argv: vec!["__fluidity_missing_command__".to_string()],
+            resume: ToolResumeStrategy::None,
+            provenance: ExtensionContributionProvenance {
+                source_kind: "global".to_string(),
+                extension_id: "example.missing".to_string(),
+                manifest_path: None,
+                project_id: None,
+                project_root: None,
+            },
         };
 
         let availability = tool_availability_for_tile("/bin/sh", &tile);
@@ -2636,6 +3603,10 @@ mod tests {
 
         assert_eq!(sanitized.tiles.len(), 1);
         assert_eq!(sanitized.tiles[0].kind, "tool");
+        assert_eq!(
+            sanitized.tiles[0].extension_id.as_deref(),
+            Some(CORE_EXTENSION_ID)
+        );
         assert_eq!(sanitized.tiles[0].integration_id.as_deref(), Some("claude"));
         assert_eq!(
             sanitized.tiles[0].integration_tile_id.as_deref(),
@@ -2669,6 +3640,10 @@ mod tests {
 
         assert_eq!(sanitized.tiles.len(), 1);
         assert_eq!(sanitized.tiles[0].kind, "tool");
+        assert_eq!(
+            sanitized.tiles[0].extension_id.as_deref(),
+            Some(CORE_EXTENSION_ID)
+        );
         assert_eq!(sanitized.tiles[0].integration_id.as_deref(), Some("codex"));
         assert_eq!(
             sanitized.tiles[0].integration_tile_id.as_deref(),
@@ -2683,6 +3658,7 @@ mod tests {
         let mut tile = tile_with_initial_command("claude");
         tile.kind = "workspace".to_string();
         tile.title = "".to_string();
+        tile.extension_id = Some(CORE_EXTENSION_ID.to_string());
         tile.integration_id = Some("claude".to_string());
         tile.integration_tile_id = Some("cli".to_string());
         tile.resume = Some(resume("claude", "session-1"));
@@ -2693,9 +3669,210 @@ mod tests {
         assert_eq!(sanitized.tiles.len(), 1);
         assert_eq!(sanitized.tiles[0].kind, "workspace");
         assert_eq!(sanitized.tiles[0].title, "Workspaces");
+        assert!(sanitized.tiles[0].extension_id.is_none());
         assert!(sanitized.tiles[0].integration_id.is_none());
         assert!(sanitized.tiles[0].integration_tile_id.is_none());
         assert!(sanitized.tiles[0].resume.is_none());
+    }
+
+    #[test]
+    fn sanitize_tile_state_preserves_unresolved_tool_tiles() {
+        let tile_state = WorkspaceTileState {
+            tiles: vec![PersistedTile {
+                id: "tile-unresolved".to_string(),
+                kind: "tool".to_string(),
+                title: "Missing Agent".to_string(),
+                extension_id: Some("example.missing".to_string()),
+                integration_id: Some("missing-agent".to_string()),
+                integration_tile_id: Some("cli".to_string()),
+                resume: Some(resume("example.missing.missing-agent.cli", "session-1")),
+                tool_id: None,
+                initial_command: None,
+                x: 0,
+                y: 0,
+                w: MIN_TILE_WIDTH,
+                h: MIN_TILE_HEIGHT,
+            }],
+        };
+
+        let sanitized = sanitize_tile_state(tile_state);
+
+        assert_eq!(sanitized.tiles.len(), 1);
+        let tile = &sanitized.tiles[0];
+        assert_eq!(tile.kind, "tool");
+        assert_eq!(tile.title, "Missing Agent");
+        assert_eq!(tile.extension_id.as_deref(), Some("example.missing"));
+        assert_eq!(tile.integration_id.as_deref(), Some("missing-agent"));
+        assert_eq!(tile.integration_tile_id.as_deref(), Some("cli"));
+        assert_eq!(
+            tile.resume
+                .as_ref()
+                .map(|resume| resume.identifier.as_str()),
+            Some("session-1")
+        );
+    }
+
+    #[test]
+    fn unresolved_tool_launch_returns_specific_unavailable_error() {
+        let launch = TerminalLaunchRequest {
+            kind: "tool".to_string(),
+            extension_id: Some("example.missing".to_string()),
+            integration_id: Some("missing-agent".to_string()),
+            integration_tile_id: Some("cli".to_string()),
+            resume: None,
+            tool_id: None,
+        };
+
+        let error = tool_integration_tile_for_launch_without_project_scope(&launch).unwrap_err();
+
+        assert!(error.contains("Integration Tile unavailable"));
+        assert!(error.contains("example.missing:missing-agent.cli"));
+    }
+
+    #[test]
+    fn extension_catalog_loads_global_extensions_and_reports_invalid_definitions() {
+        let app_data_dir = test_temp_dir("fluidity-global-extension");
+        write_extension_manifest(
+            &app_data_dir.join("extensions").join("example.global"),
+            r#"{
+              "schemaVersion": 1,
+              "id": "example.global",
+              "title": "Global Test Extension",
+              "contributes": {
+                "integrations": [{
+                  "id": "global-agent",
+                  "title": "Global Agent",
+                  "tiles": [{
+                    "id": "cli",
+                    "kind": "tool",
+                    "title": "Global Agent CLI",
+                    "defaultVisible": true,
+                    "command": { "argv": ["echo", "from-global"] }
+                  }]
+                }]
+              }
+            }"#,
+        );
+        write_extension_manifest(
+            &app_data_dir.join("extensions").join("example.invalid"),
+            r#"{ "schemaVersion": 1, "id": "example.invalid" }"#,
+        );
+        let state = test_workspace_state(app_data_dir.clone(), Vec::new(), Vec::new());
+
+        let snapshot = extension_catalog_for_workspace(&state, None);
+
+        let tile = snapshot
+            .tiles
+            .iter()
+            .find(|tile| {
+                tile.extension_id == "example.global"
+                    && tile.integration_id == "global-agent"
+                    && tile.integration_tile_id == "cli"
+            })
+            .expect("Global Extension contribution should be in the catalog");
+        assert_eq!(tile.title, "Global Agent CLI");
+        assert_eq!(tile.command_argv, vec!["echo", "from-global"]);
+        assert_eq!(tile.provenance.source_kind, "global");
+        assert_eq!(tile.provenance.extension_id, "example.global");
+        assert!(tile.provenance.manifest_path.is_some());
+        assert!(snapshot
+            .extensions
+            .iter()
+            .any(|extension| extension.extension_id == "example.global"
+                && extension.status == "loaded"));
+        assert!(snapshot.diagnostics.iter().any(|diagnostic| {
+            diagnostic.extension_id == "example.invalid" && diagnostic.severity == "error"
+        }));
+
+        let _ = fs::remove_dir_all(app_data_dir);
+    }
+
+    #[test]
+    fn project_extensions_are_workspace_scoped_and_launch_configured_argv() {
+        let temp_dir = test_temp_dir("fluidity-project-extension");
+        let app_data_dir = temp_dir.join("app-data");
+        let project_root = temp_dir.join("project");
+        write_extension_manifest(
+            &project_root
+                .join(".fluidity")
+                .join("extensions")
+                .join("example.project"),
+            r#"{
+              "schemaVersion": 1,
+              "id": "example.project",
+              "title": "Project Test Extension",
+              "contributes": {
+                "integrations": [{
+                  "id": "project-agent",
+                  "title": "Project Agent",
+                  "tiles": [{
+                    "id": "cli",
+                    "kind": "tool",
+                    "title": "Project Agent CLI",
+                    "command": { "argv": ["echo", "from-project"] },
+                    "resume": { "strategy": "session-id-arg", "arg": "--session" }
+                  }]
+                }]
+              }
+            }"#,
+        );
+        let state = test_workspace_state(
+            app_data_dir,
+            vec![RegisteredProject {
+                id: "project-1".to_string(),
+                name: "Project".to_string(),
+                root: project_root.to_string_lossy().to_string(),
+                kind: ProjectKind::Plain,
+                settings: ProjectSettings::default(),
+            }],
+            vec![OpenWorkspace {
+                id: "workspace-1".to_string(),
+                project_id: "project-1".to_string(),
+                name: "Project".to_string(),
+                root: project_root.to_string_lossy().to_string(),
+                git_branch: None,
+                tile_state: default_workspace_tile_state(),
+                last_used_at: 0,
+            }],
+        );
+
+        let global_snapshot = extension_catalog_for_workspace(&state, None);
+        assert!(!global_snapshot
+            .tiles
+            .iter()
+            .any(|tile| tile.extension_id == "example.project"));
+
+        let workspace_snapshot = extension_catalog_for_workspace(&state, Some("workspace-1"));
+        let tile = workspace_snapshot
+            .tiles
+            .iter()
+            .find(|tile| tile.extension_id == "example.project")
+            .expect("project Extension contribution should be in the Workspace catalog");
+        assert_eq!(tile.provenance.source_kind, "project");
+        assert_eq!(tile.provenance.project_id.as_deref(), Some("project-1"));
+        assert_eq!(
+            tile.provenance.project_root.as_deref(),
+            Some(project_root.to_string_lossy().as_ref())
+        );
+
+        let launch = TerminalLaunchRequest {
+            kind: "tool".to_string(),
+            extension_id: Some("example.project".to_string()),
+            integration_id: Some("project-agent".to_string()),
+            integration_tile_id: Some("cli".to_string()),
+            resume: Some(resume("example.project.project-agent.cli", "session-1")),
+            tool_id: None,
+        };
+        let resolved_tile = tool_integration_tile_for_launch(&state, "workspace-1", &launch)
+            .expect("launch should resolve")
+            .expect("launch should resolve a tool tile");
+        let plan = terminal_launch_plan_for_resolved_tool(&launch, Some(&resolved_tile)).unwrap();
+        assert_eq!(
+            plan.shell_command,
+            Some("'echo' 'from-project' '--session' 'session-1'".to_string())
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 
     fn resume(provider: &str, identifier: &str) -> TileResumeMetadata {
@@ -2708,6 +3885,7 @@ mod tests {
     fn tool_launch(tool_id: &str, resume: Option<TileResumeMetadata>) -> TerminalLaunchRequest {
         TerminalLaunchRequest {
             kind: "tool".to_string(),
+            extension_id: Some(CORE_EXTENSION_ID.to_string()),
             integration_id: Some(tool_id.to_string()),
             integration_tile_id: Some("cli".to_string()),
             resume,
@@ -2732,6 +3910,7 @@ mod tests {
             id: "tile-test".to_string(),
             kind: "terminal".to_string(),
             title: "Test".to_string(),
+            extension_id: None,
             integration_id: None,
             integration_tile_id: None,
             resume: None,
@@ -2749,6 +3928,7 @@ mod tests {
             id: "tile-test".to_string(),
             kind: "tool".to_string(),
             title: "".to_string(),
+            extension_id: None,
             integration_id: None,
             integration_tile_id: None,
             resume: None,
@@ -2758,6 +3938,33 @@ mod tests {
             y: 0,
             w: MIN_TILE_WIDTH,
             h: MIN_TILE_HEIGHT,
+        }
+    }
+
+    fn test_temp_dir(prefix: &str) -> PathBuf {
+        let path = env::temp_dir().join(format!("{}-{}", prefix, Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn write_extension_manifest(extension_dir: &Path, manifest: &str) {
+        fs::create_dir_all(extension_dir).unwrap();
+        fs::write(extension_dir.join(EXTENSION_DEFINITION_FILE), manifest).unwrap();
+    }
+
+    fn test_workspace_state(
+        app_data_dir: PathBuf,
+        projects: Vec<RegisteredProject>,
+        open_workspaces: Vec<OpenWorkspace>,
+    ) -> WorkspaceState {
+        WorkspaceState {
+            state_path: app_data_dir.join(APP_STATE_FILE),
+            app_data_dir,
+            app_state: Mutex::new(PersistedAppState {
+                projects,
+                open_workspaces,
+                ..PersistedAppState::default()
+            }),
         }
     }
 }

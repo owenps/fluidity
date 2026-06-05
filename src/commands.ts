@@ -23,7 +23,8 @@ export interface AppCommandApi {
   setFocusModeTileId: (updater: (tileId: string | null) => string | null) => void;
   openTilePicker: () => void;
   openWorkspacePicker: () => void;
-  openSettings: () => void;
+  openSettings: (category?: "extensions") => void;
+  reloadExtensions: () => void;
   addProject: () => void;
   discardWorkspace: () => void;
 }
@@ -113,6 +114,20 @@ function behaviorForCommand(commandId: string): Pick<Command, "canRun" | "run"> 
     return {
       canRun: () => true,
       run: (api) => api.openSettings(),
+    };
+  }
+
+  if (commandId === "extensions.open") {
+    return {
+      canRun: () => true,
+      run: (api) => api.openSettings("extensions"),
+    };
+  }
+
+  if (commandId === "extensions.reload") {
+    return {
+      canRun: () => true,
+      run: (api) => api.reloadExtensions(),
     };
   }
 

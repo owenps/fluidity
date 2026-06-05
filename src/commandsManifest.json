@@ -11,6 +11,14 @@
     "nativeAccelerator": "Cmd+,"
   },
   {
+    "id": "extensions.open",
+    "title": "Open Extensions"
+  },
+  {
+    "id": "extensions.reload",
+    "title": "Reload Extensions"
+  },
+  {
     "id": "project.add",
     "title": "Add Project…"
   },

@@ -54,6 +54,7 @@ export function TerminalTile({
     cwd,
     workspaceId,
     launch.kind,
+    launch.kind === "tool" ? launch.extensionId : undefined,
     launch.kind === "tool" ? launch.integrationId : undefined,
     launch.kind === "tool" ? launch.integrationTileId : undefined,
     tileId,

@@ -19,7 +19,7 @@ Fluidity's extensibility direction is to make the application a customizable pla
 - v1 Tool Tile resume behavior uses explicit strategies, starting with `none` and `session-id-arg` rather than arbitrary launch templates.
 - Persisted Integration Tiles resolve by `extensionId + integrationId + integrationTileId`, not by Integration identity alone.
 - v1 Extensions use an **Extension Definition** stored in `fluidity.extension.json` with a `schemaVersion` field; the v1 schema is documented in [Extension Definitions](extension-definitions.md).
-- `fluidity.extension.json` is a forward-compatible declaration layer, not a permanent rejection of executable Extension modules.
+- `fluidity.extension.json` is a forward-compatible declaration layer, not a permanent rejection of executable Extension modules; the future executable path is researched in [Executable Extension Modules Research](executable-extension-modules.md).
 - Fluidity should support both **Global Extensions** and **Project Extensions**.
 - Global Extensions live under Fluidity's app data directory at `extensions/<extension-id>/fluidity.extension.json` and are available across all Projects and Workspaces in this Fluidity app installation.
 - Project Extensions live under `.fluidity/extensions/<extension-id>/fluidity.extension.json` in the Project root and are available only for that Project's Workspaces.
@@ -32,10 +32,9 @@ Fluidity's extensibility direction is to make the application a customizable pla
 - The first Fluidity Skill should focus on Extension authoring and be named `fluidity-extensions`; its requirements and draft outline are documented in [`fluidity-extensions` Skill Requirements](fluidity-extensions-skill.md).
 - Fluidity should prompt users to install the Skill when they take Extension-related actions, showing the command `npx skills add owenps/fluidity-extensions` rather than running it automatically.
 
-## Open research questions
+## Executable Extension module direction
 
-- What contribution registry shape lets manifest-only Extensions later coexist with executable Extension modules?
-- What permissions/trust model is required before executable Extension modules are supported?
+Executable Extension modules remain future work. Fluidity should not directly copy Pi's arbitrary in-process TypeScript extension model; executable modules should keep `fluidity.extension.json` as the required declaration and permission surface, run outside Fluidity Core through a supervised host, and contribute through the same Workspace-scoped registry as manifest-only Extensions.
 
 ## v1 research target
 
