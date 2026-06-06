@@ -136,13 +136,35 @@ function spanOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number)
   return Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
 }
 
+export function canMoveTile(
+  tiles: Tile[],
+  focusedTileId: string | null,
+  direction: Direction,
+): boolean {
+  return createTileMovePlan(tiles, focusedTileId, direction) !== null;
+}
+
 export function moveTile(
   tiles: Tile[],
   focusedTileId: string | null,
   direction: Direction,
 ): Tile[] {
+  const plan = createTileMovePlan(tiles, focusedTileId, direction);
+  if (!plan) return tiles;
+  return tiles.map(plan.updateTile);
+}
+
+type TileMovePlan = {
+  updateTile: (tile: Tile) => Tile;
+};
+
+function createTileMovePlan(
+  tiles: Tile[],
+  focusedTileId: string | null,
+  direction: Direction,
+): TileMovePlan | null {
   const focused = findTile(tiles, focusedTileId);
-  if (!focused) return tiles;
+  if (!focused) return null;
 
   const moved: Tile = {
     ...focused,
@@ -156,10 +178,12 @@ export function moveTile(
       tiles.filter((tile) => tile.id !== focused.id),
     )
   ) {
-    return tiles;
+    return null;
   }
 
-  return tiles.map((tile) => (tile.id === focused.id ? moved : tile));
+  return {
+    updateTile: (tile) => (tile.id === focused.id ? moved : tile),
+  };
 }
 
 export function canResizeTile(

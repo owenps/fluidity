@@ -1,10 +1,12 @@
 import commandsManifest from "./commandsManifest.json";
 import type { Direction, Tile } from "./types";
 import {
+  canMoveTile,
   canResizeTile,
   closeTile,
   findTile,
   focusTileInDirection,
+  moveTile,
   resizeTile,
   splitFocusedTileInDirection,
   type TileSplitDirection,
@@ -202,6 +204,19 @@ function behaviorForCommand(commandId: string): Pick<Command, "canRun" | "run"> 
     };
   }
 
+  if (directionalCommand?.verb === "move") {
+    return {
+      canRun: (state) =>
+        requiresFocusedTileOutsideFocusMode(state) &&
+        canMoveTile(state.tiles, state.focusedTileId, directionalCommand.direction),
+      run: (api) => {
+        api.setTiles((tiles) =>
+          moveTile(tiles, api.getState().focusedTileId, directionalCommand.direction),
+        );
+      },
+    };
+  }
+
   if (directionalCommand?.verb === "resize") {
     return {
       canRun: (state) =>
@@ -234,7 +249,7 @@ function behaviorForCommand(commandId: string): Pick<Command, "canRun" | "run"> 
 }
 
 type DirectionalCommand =
-  | { verb: "focus" | "resize"; direction: Direction }
+  | { verb: "focus" | "move" | "resize"; direction: Direction }
   | { verb: "split"; direction: TileSplitDirection };
 
 function parseDirectionalCommand(commandId: string): DirectionalCommand | null {
@@ -242,7 +257,7 @@ function parseDirectionalCommand(commandId: string): DirectionalCommand | null {
   const verb = parts[1];
   const direction = parts[2];
   if (parts[0] !== "tile") return null;
-  if (verb === "focus" || verb === "resize") {
+  if (verb === "focus" || verb === "move" || verb === "resize") {
     if (!isDirection(direction)) return null;
     return { verb, direction };
   }

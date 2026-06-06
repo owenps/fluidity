@@ -167,6 +167,82 @@
     ]
   },
   {
+    "id": "tile.move.left",
+    "title": "Move Left",
+    "shortcutGroup": "Layout",
+    "shortcuts": [
+      {
+        "key": "h",
+        "alt": true,
+        "shift": true,
+        "displayKeys": ["⌥", "⇧", "H"]
+      },
+      {
+        "key": "arrowleft",
+        "alt": true,
+        "shift": true,
+        "displayKeys": ["⌥", "⇧", "←"]
+      }
+    ]
+  },
+  {
+    "id": "tile.move.down",
+    "title": "Move Down",
+    "shortcutGroup": "Layout",
+    "shortcuts": [
+      {
+        "key": "j",
+        "alt": true,
+        "shift": true,
+        "displayKeys": ["⌥", "⇧", "J"]
+      },
+      {
+        "key": "arrowdown",
+        "alt": true,
+        "shift": true,
+        "displayKeys": ["⌥", "⇧", "↓"]
+      }
+    ]
+  },
+  {
+    "id": "tile.move.up",
+    "title": "Move Up",
+    "shortcutGroup": "Layout",
+    "shortcuts": [
+      {
+        "key": "k",
+        "alt": true,
+        "shift": true,
+        "displayKeys": ["⌥", "⇧", "K"]
+      },
+      {
+        "key": "arrowup",
+        "alt": true,
+        "shift": true,
+        "displayKeys": ["⌥", "⇧", "↑"]
+      }
+    ]
+  },
+  {
+    "id": "tile.move.right",
+    "title": "Move Right",
+    "shortcutGroup": "Layout",
+    "shortcuts": [
+      {
+        "key": "l",
+        "alt": true,
+        "shift": true,
+        "displayKeys": ["⌥", "⇧", "L"]
+      },
+      {
+        "key": "arrowright",
+        "alt": true,
+        "shift": true,
+        "displayKeys": ["⌥", "⇧", "→"]
+      }
+    ]
+  },
+  {
     "id": "tile.resize.left",
     "title": "Resize Left",
     "shortcutGroup": "Layout",
