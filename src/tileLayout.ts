@@ -1,14 +1,15 @@
 import {
+  DEFAULT_WORKSPACE_TILE_WIDTH,
   GRID_COLUMNS,
+  GRID_MIN_TILE_HEIGHT,
+  GRID_MIN_TILE_WIDTH,
   GRID_ROWS,
-  MIN_TILE_HEIGHT,
-  MIN_TILE_WIDTH,
   type Direction,
   type Tile,
 } from "./types";
 
 export function createDefaultTiles(): Tile[] {
-  const workspaceTileWidth = MIN_TILE_WIDTH;
+  const workspaceTileWidth = DEFAULT_WORKSPACE_TILE_WIDTH;
 
   return [
     {
@@ -261,7 +262,7 @@ function growFocusedLeftEdge(tiles: Tile[], focused: Tile): TileResizePlan | nul
 
   const candidates = tilesAlongLeftEdge(tiles, focused);
   if (!tilesCoverSpan(candidates, "y", focused.y, focused.y + focused.h)) return null;
-  if (candidates.some((tile) => tile.w <= MIN_TILE_WIDTH)) return null;
+  if (candidates.some((tile) => tile.w <= GRID_MIN_TILE_WIDTH)) return null;
 
   const shrinkingTileIds = new Set(candidates.map((tile) => tile.id));
   return verifiedResizePlan(tiles, (tile) => {
@@ -276,7 +277,7 @@ function growFocusedRightEdge(tiles: Tile[], focused: Tile): TileResizePlan | nu
 
   const candidates = tilesAlongRightEdge(tiles, focused);
   if (!tilesCoverSpan(candidates, "y", focused.y, focused.y + focused.h)) return null;
-  if (candidates.some((tile) => tile.w <= MIN_TILE_WIDTH)) return null;
+  if (candidates.some((tile) => tile.w <= GRID_MIN_TILE_WIDTH)) return null;
 
   const shrinkingTileIds = new Set(candidates.map((tile) => tile.id));
   return verifiedResizePlan(tiles, (tile) => {
@@ -291,7 +292,7 @@ function growFocusedTopEdge(tiles: Tile[], focused: Tile): TileResizePlan | null
 
   const candidates = tilesAlongTopEdge(tiles, focused);
   if (!tilesCoverSpan(candidates, "x", focused.x, focused.x + focused.w)) return null;
-  if (candidates.some((tile) => tile.h <= MIN_TILE_HEIGHT)) return null;
+  if (candidates.some((tile) => tile.h <= GRID_MIN_TILE_HEIGHT)) return null;
 
   const shrinkingTileIds = new Set(candidates.map((tile) => tile.id));
   return verifiedResizePlan(tiles, (tile) => {
@@ -306,7 +307,7 @@ function growFocusedBottomEdge(tiles: Tile[], focused: Tile): TileResizePlan | n
 
   const candidates = tilesAlongBottomEdge(tiles, focused);
   if (!tilesCoverSpan(candidates, "x", focused.x, focused.x + focused.w)) return null;
-  if (candidates.some((tile) => tile.h <= MIN_TILE_HEIGHT)) return null;
+  if (candidates.some((tile) => tile.h <= GRID_MIN_TILE_HEIGHT)) return null;
 
   const shrinkingTileIds = new Set(candidates.map((tile) => tile.id));
   return verifiedResizePlan(tiles, (tile) => {
@@ -317,7 +318,7 @@ function growFocusedBottomEdge(tiles: Tile[], focused: Tile): TileResizePlan | n
 }
 
 function shrinkFocusedLeftEdge(tiles: Tile[], focused: Tile): TileResizePlan | null {
-  if (focused.w <= MIN_TILE_WIDTH) return null;
+  if (focused.w <= GRID_MIN_TILE_WIDTH) return null;
 
   const candidates = tilesAlongLeftEdge(tiles, focused);
   if (!tilesCoverSpan(candidates, "y", focused.y, focused.y + focused.h)) return null;
@@ -331,7 +332,7 @@ function shrinkFocusedLeftEdge(tiles: Tile[], focused: Tile): TileResizePlan | n
 }
 
 function shrinkFocusedRightEdge(tiles: Tile[], focused: Tile): TileResizePlan | null {
-  if (focused.w <= MIN_TILE_WIDTH) return null;
+  if (focused.w <= GRID_MIN_TILE_WIDTH) return null;
 
   const candidates = tilesAlongRightEdge(tiles, focused);
   if (!tilesCoverSpan(candidates, "y", focused.y, focused.y + focused.h)) return null;
@@ -345,7 +346,7 @@ function shrinkFocusedRightEdge(tiles: Tile[], focused: Tile): TileResizePlan | 
 }
 
 function shrinkFocusedTopEdge(tiles: Tile[], focused: Tile): TileResizePlan | null {
-  if (focused.h <= MIN_TILE_HEIGHT) return null;
+  if (focused.h <= GRID_MIN_TILE_HEIGHT) return null;
 
   const candidates = tilesAlongTopEdge(tiles, focused);
   if (!tilesCoverSpan(candidates, "x", focused.x, focused.x + focused.w)) return null;
@@ -359,7 +360,7 @@ function shrinkFocusedTopEdge(tiles: Tile[], focused: Tile): TileResizePlan | nu
 }
 
 function shrinkFocusedBottomEdge(tiles: Tile[], focused: Tile): TileResizePlan | null {
-  if (focused.h <= MIN_TILE_HEIGHT) return null;
+  if (focused.h <= GRID_MIN_TILE_HEIGHT) return null;
 
   const candidates = tilesAlongBottomEdge(tiles, focused);
   if (!tilesCoverSpan(candidates, "x", focused.x, focused.x + focused.w)) return null;
@@ -446,20 +447,20 @@ export function splitFocusedTile(
   if (!focused) return { tiles, focusedTileId };
 
   if (direction === "right") {
-    if (focused.w >= MIN_TILE_WIDTH * 2) return splitTileRight(tiles, focused, newTileOptions);
+    if (focused.w >= GRID_MIN_TILE_WIDTH * 2) return splitTileRight(tiles, focused, newTileOptions);
     return { tiles, focusedTileId };
   }
 
   if (direction === "down") {
-    if (focused.h >= MIN_TILE_HEIGHT * 2) return splitTileDown(tiles, focused, newTileOptions);
+    if (focused.h >= GRID_MIN_TILE_HEIGHT * 2) return splitTileDown(tiles, focused, newTileOptions);
     return { tiles, focusedTileId };
   }
 
-  if (focused.w >= MIN_TILE_WIDTH * 2) {
+  if (focused.w >= GRID_MIN_TILE_WIDTH * 2) {
     return splitTileRight(tiles, focused, newTileOptions);
   }
 
-  if (focused.h >= MIN_TILE_HEIGHT * 2) {
+  if (focused.h >= GRID_MIN_TILE_HEIGHT * 2) {
     return splitTileDown(tiles, focused, newTileOptions);
   }
 
@@ -476,11 +477,11 @@ export function splitFocusedTileInDirection(
 
   const newTileOptions: NewTileOptions = tileOptionsForClone(focused);
 
-  if (direction === "right" && focused.w >= MIN_TILE_WIDTH * 2) {
+  if (direction === "right" && focused.w >= GRID_MIN_TILE_WIDTH * 2) {
     return splitTileRight(tiles, focused, newTileOptions);
   }
 
-  if (direction === "down" && focused.h >= MIN_TILE_HEIGHT * 2) {
+  if (direction === "down" && focused.h >= GRID_MIN_TILE_HEIGHT * 2) {
     return splitTileDown(tiles, focused, newTileOptions);
   }
 
@@ -697,7 +698,7 @@ function isValidLayout(tiles: Tile[]): boolean {
 
 function isValidPlacement(tile: Tile, otherTiles: Tile[]): boolean {
   if (tile.x < 0 || tile.y < 0) return false;
-  if (tile.w < MIN_TILE_WIDTH || tile.h < MIN_TILE_HEIGHT) return false;
+  if (tile.w < GRID_MIN_TILE_WIDTH || tile.h < GRID_MIN_TILE_HEIGHT) return false;
   if (tile.x + tile.w > GRID_COLUMNS || tile.y + tile.h > GRID_ROWS) return false;
   return otherTiles.every((other) => !overlaps(tile, other));
 }

@@ -4,23 +4,29 @@ The Settings View is a full-page app-level surface for changing Settings and Pro
 
 ## Layout
 
-The Settings View uses a two-panel layout:
+The Settings View uses two top-level scopes:
 
-- Left panel: Settings Categories followed by a Projects section.
-- Right panel: details for the selected Settings Category or selected Project.
+- **Global**: app-wide Settings.
+- **Project**: Project Settings for one selected Registered Project.
 
-Opening Settings defaults to General unless a destination was selected earlier in the same app session. The selected destination is not persisted across app restarts. Opening Settings while it is already open is idempotent: it focuses Settings rather than closing it.
+Each scope uses a two-panel layout:
 
-The Projects section lists existing Registered Projects by Project name in alphabetical order. Project rows show the Project name only. If there are no Registered Projects, the section remains visible with an empty state. Settings does not include Add Project.
+- Left panel: categories for the current scope.
+- Right panel: details for the selected category.
+
+The Project scope includes a Project selector above the category/details panels. The selector lists Registered Projects by Project name in alphabetical order. If there are no Registered Projects, the selector shows an empty state. Settings does not include Add Project.
+
+Opening Settings defaults to Global → General unless a scope/category was selected earlier in the same app session. The selected scope/category and Project selector are not persisted across app restarts. Opening Settings while it is already open is idempotent: it focuses Settings rather than closing it.
 
 ## Settings Categories
 
-The first Settings Categories are:
+The Global Settings Categories are:
 
 1. General
 2. Appearance
 3. Tiles
-4. Keybinds
+4. Extensions
+5. Keybinds
 
 ### General
 
@@ -52,8 +58,10 @@ The Settings View owns keyboard input while open. Workspace and Tile shortcuts d
 
 Navigation supports both arrow keys and `h/j/k/l`:
 
+- `Tab`: switch between Global and Project scopes.
 - Left panel focused:
-  - `j/k`: move selection through Settings Categories and Projects; the right panel updates immediately.
+  - `j/k`: move selection through categories for the current scope; the right panel updates immediately.
+  - In Project scope, `k`/up from the first category focuses the Project selector; native select arrow keys choose the Project.
   - `l` or `Enter`: move focus into the right panel.
 - Right panel focused:
   - `j/k`: move between controls and actions.
@@ -72,22 +80,31 @@ Settings and Project Settings save immediately when changed. Project Settings ch
 
 ## Project Settings
 
-Selecting a Project shows its Project Settings in the right panel. The detail includes:
+The Project scope categories are:
 
-- Project name
-- Project root
-- Project kind
-- root availability
-- Project Settings controls
-- a Project Danger Zone containing Disconnect Project
+1. Overview: Project name, root, kind, and root availability.
+2. Workspaces: Project Settings that affect Workspace behavior.
+3. Danger Zone: Disconnect Project.
 
-Unavailable Registered Projects remain visible so they can be inspected or disconnected.
+Unavailable Registered Projects remain visible in the Project selector so they can be inspected or disconnected.
 
-Disconnecting a Project from Settings removes that Registered Project, closes its Open Workspaces, and removes Fluidity-managed workspace roots without deleting the Project root or local or remote branches. After disconnecting the selected Project, Settings selects the next Project alphabetically if one exists; otherwise it selects General.
+Disconnecting a Project from Settings removes that Registered Project, closes its Open Workspaces, and removes Fluidity-managed workspace roots without deleting the Project root or local or remote branches. After disconnecting the selected Project, Settings selects the next Project alphabetically if one exists; otherwise it returns to Global → General.
 
-## Workspace Branch Discard Policy
+## Git-backed Project Settings
 
-The first Project Setting is the Workspace Branch Discard Policy for Git-backed Projects.
+### Files copied into new Workspaces
+
+User-facing label: **Files copied into new Workspaces**
+
+Description: **One Project-root-relative file per line. New git-backed Workspaces copy these files before opening, preserving relative paths.**
+
+Default: empty.
+
+Each entry is a file path relative to the Project root. When creating a new Git-backed Workspace, Fluidity copies each configured file from the Project root into the Workspace root after `git worktree add` and before the Workspace is opened. Relative paths and file contents are preserved, so `.env` copied from the Project root lands at `.env` in the Workspace, and `config/local.json` lands at `config/local.json`. The copy step can include files untracked by git or ignored by git.
+
+Invalid paths, missing files, directories, unreadable files, or copy failures do not silently fail. Fluidity completes Workspace creation when possible and reports Workspace creation warnings naming the skipped file and reason. If no files are configured, Workspace creation behaves as before.
+
+### Workspace Branch Discard Policy
 
 User-facing label: **Delete local branch when discarding workspace**
 

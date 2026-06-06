@@ -1,7 +1,8 @@
 export const GRID_COLUMNS = 12;
 export const GRID_ROWS = 8;
-export const MIN_TILE_WIDTH = 3;
-export const MIN_TILE_HEIGHT = 2;
+export const GRID_MIN_TILE_WIDTH = 1;
+export const GRID_MIN_TILE_HEIGHT = 1;
+export const DEFAULT_WORKSPACE_TILE_WIDTH = 3;
 
 export type Direction = "left" | "down" | "up" | "right";
 
@@ -44,6 +45,7 @@ export type ProjectKind = "git" | "plain";
 
 export interface ProjectSettings {
   deleteWorkspaceBranchOnDiscard: boolean;
+  workspaceCopyFiles: string[];
 }
 
 export interface RegisteredProject {

@@ -23,8 +23,9 @@ const terminalFontSizeMin = 10;
 const terminalFontSizeMax = 24;
 const terminalFontSizeStep = 1;
 
+type SettingsScope = "global" | "project";
 type SettingsCategoryId = "general" | "appearance" | "tiles" | "extensions" | "keybinds";
-type Destination = { kind: "category"; id: SettingsCategoryId } | { kind: "project"; id: string };
+type ProjectSettingsCategoryId = "overview" | "workspaces" | "danger";
 type FocusPane = "left" | "right";
 
 const settingsCategories: { id: SettingsCategoryId; title: string }[] = [
@@ -33,6 +34,12 @@ const settingsCategories: { id: SettingsCategoryId; title: string }[] = [
   { id: "tiles", title: "Tiles" },
   { id: "extensions", title: "Extensions" },
   { id: "keybinds", title: "Keybinds" },
+];
+
+const projectSettingsCategories: { id: ProjectSettingsCategoryId; title: string }[] = [
+  { id: "overview", title: "Overview" },
+  { id: "workspaces", title: "Workspaces" },
+  { id: "danger", title: "Danger Zone" },
 ];
 
 interface SettingsViewProps {
@@ -63,20 +70,10 @@ interface SettingsViewProps {
   initialCategory?: SettingsCategoryId | null;
 }
 
-let lastSelectedDestinationKey = "category:general";
-
-function destinationKey(destination: Destination): string {
-  return destination.kind === "category"
-    ? `category:${destination.id}`
-    : `project:${destination.id}`;
-}
-
-function destinationFromKey(key: string): Destination {
-  const [kind, id] = key.split(":", 2);
-  return kind === "project"
-    ? { kind: "project", id }
-    : { kind: "category", id: id as SettingsCategoryId };
-}
+let lastSettingsScope: SettingsScope = "global";
+let lastGlobalCategoryId: SettingsCategoryId = "general";
+let lastProjectCategoryId: ProjectSettingsCategoryId = "overview";
+let lastSelectedProjectId: string | null = null;
 
 function projectSort(left: RegisteredProject, right: RegisteredProject) {
   return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
@@ -101,15 +98,17 @@ function sortedTilePickerConfigurationItems(
   });
 }
 
-function controlIdsForDestination(
-  destination: Destination,
+function controlIdsForSelection(
+  scope: SettingsScope,
+  globalCategory: SettingsCategoryId,
+  projectCategory: ProjectSettingsCategoryId,
   project: RegisteredProject | null,
   tilePickerItems = defaultConfigurableTilePickerItems,
 ) {
-  if (destination.kind === "category") {
-    if (destination.id === "general") return ["debug-layout", "reset-application"];
-    if (destination.id === "appearance") return ["terminal-font-size", "workspace-stat-colors"];
-    if (destination.id === "tiles") {
+  if (scope === "global") {
+    if (globalCategory === "general") return ["debug-layout", "reset-application"];
+    if (globalCategory === "appearance") return ["terminal-font-size", "workspace-stat-colors"];
+    if (globalCategory === "tiles") {
       return [
         "tile-headers",
         "tile-picker-refresh",
@@ -117,16 +116,20 @@ function controlIdsForDestination(
         ...tilePickerItems.map((item) => `tile-picker:${item.id}`),
       ];
     }
-    if (destination.id === "extensions") return ["extensions-reload"];
+    if (globalCategory === "extensions") return ["extensions-reload"];
     return keyboardShortcutGroups.flatMap((group) =>
       group.shortcuts.map((shortcut) => shortcut.id),
     );
   }
 
   if (!project) return [];
-  return project.kind === "git"
-    ? ["delete-workspace-branch-on-discard", "disconnect-project"]
-    : ["disconnect-project"];
+  if (projectCategory === "workspaces") {
+    return project.kind === "git"
+      ? ["workspace-copy-files", "delete-workspace-branch-on-discard"]
+      : [];
+  }
+  if (projectCategory === "danger") return ["disconnect-project"];
+  return [];
 }
 
 export function SettingsView({
@@ -158,10 +161,15 @@ export function SettingsView({
 }: SettingsViewProps) {
   const viewRef = useRef<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const projectPickerRef = useRef<HTMLSelectElement | null>(null);
+  const workspaceCopyFilesRef = useRef<HTMLTextAreaElement | null>(null);
   const [focusPane, setFocusPane] = useState<FocusPane>("left");
-  const [selectedDestination, setSelectedDestination] = useState<Destination>(() =>
-    destinationFromKey(lastSelectedDestinationKey),
-  );
+  const [settingsScope, setSettingsScope] = useState<SettingsScope>(lastSettingsScope);
+  const [selectedGlobalCategory, setSelectedGlobalCategory] =
+    useState<SettingsCategoryId>(lastGlobalCategoryId);
+  const [selectedProjectCategory, setSelectedProjectCategory] =
+    useState<ProjectSettingsCategoryId>(lastProjectCategoryId);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(lastSelectedProjectId);
   const [activeControlId, setActiveControlId] = useState("debug-layout");
   const [tilePickerQuery, setTilePickerQuery] = useState("");
   const tilePickerDisplayItems = useMemo(
@@ -172,22 +180,29 @@ export function SettingsView({
   const [pendingProjectRemovalId, setPendingProjectRemovalId] = useState<string | null>(null);
 
   const sortedProjects = useMemo(() => [...projects].sort(projectSort), [projects]);
-  const selectedProject =
-    selectedDestination.kind === "project"
-      ? (sortedProjects.find((project) => project.id === selectedDestination.id) ?? null)
-      : null;
-
-  const navigationDestinations = useMemo<Destination[]>(
-    () => [
-      ...settingsCategories.map((category) => ({ kind: "category" as const, id: category.id })),
-      ...sortedProjects.map((project) => ({ kind: "project" as const, id: project.id })),
-    ],
-    [sortedProjects],
-  );
-  const selectedDestinationKey = destinationKey(selectedDestination);
+  const selectedProject = selectedProjectId
+    ? (sortedProjects.find((project) => project.id === selectedProjectId) ?? null)
+    : null;
+  const activeSidebarCategories =
+    settingsScope === "global" ? settingsCategories : projectSettingsCategories;
+  const selectedSidebarCategoryId =
+    settingsScope === "global" ? selectedGlobalCategory : selectedProjectCategory;
   const rightControlIds = useMemo(
-    () => controlIdsForDestination(selectedDestination, selectedProject, tilePickerDisplayItems),
-    [selectedDestination, selectedProject, tilePickerDisplayItems],
+    () =>
+      controlIdsForSelection(
+        settingsScope,
+        selectedGlobalCategory,
+        selectedProjectCategory,
+        selectedProject,
+        tilePickerDisplayItems,
+      ),
+    [
+      settingsScope,
+      selectedGlobalCategory,
+      selectedProjectCategory,
+      selectedProject,
+      tilePickerDisplayItems,
+    ],
   );
   const visibleTilePickerItems = useMemo(() => {
     const query = tilePickerQuery.trim().toLowerCase();
@@ -197,47 +212,69 @@ export function SettingsView({
 
   useEffect(() => {
     if (initialCategory) {
-      setSelectedDestination({ kind: "category", id: initialCategory });
+      setSettingsScope("global");
+      setSelectedGlobalCategory(initialCategory);
     }
     setFocusPane("left");
     viewRef.current?.focus();
   }, [focusToken, initialCategory]);
 
   useEffect(() => {
-    lastSelectedDestinationKey = destinationKey(selectedDestination);
-  }, [selectedDestination]);
+    lastSettingsScope = settingsScope;
+    lastGlobalCategoryId = selectedGlobalCategory;
+    lastProjectCategoryId = selectedProjectCategory;
+    lastSelectedProjectId = selectedProjectId;
+  }, [settingsScope, selectedGlobalCategory, selectedProjectCategory, selectedProjectId]);
 
   useEffect(() => {
-    if (selectedDestination.kind !== "project") return;
-    if (sortedProjects.some((project) => project.id === selectedDestination.id)) return;
-    setSelectedDestination({ kind: "category", id: "general" });
-    setFocusPane("left");
-  }, [selectedDestination, sortedProjects]);
+    if (sortedProjects.length === 0) {
+      if (selectedProjectId !== null) setSelectedProjectId(null);
+      return;
+    }
+    if (selectedProjectId && sortedProjects.some((project) => project.id === selectedProjectId)) {
+      return;
+    }
+    setSelectedProjectId(sortedProjects[0].id);
+  }, [selectedProjectId, sortedProjects]);
 
   useEffect(() => {
-    const validControlIds = controlIdsForDestination(
-      selectedDestination,
+    const validControlIds = controlIdsForSelection(
+      settingsScope,
+      selectedGlobalCategory,
+      selectedProjectCategory,
       selectedProject,
       tilePickerDisplayItems,
     );
     if (validControlIds.includes(activeControlId)) return;
     setActiveControlId(validControlIds[0] ?? "");
-  }, [activeControlId, selectedDestination, selectedProject, tilePickerDisplayItems]);
+  }, [
+    activeControlId,
+    settingsScope,
+    selectedGlobalCategory,
+    selectedProjectCategory,
+    selectedProject,
+    tilePickerDisplayItems,
+  ]);
 
   useEffect(() => {
     if (focusPane === "right") viewRef.current?.focus();
   }, [focusPane, activeControlId]);
 
   const moveLeftSelection = (delta: number) => {
-    if (navigationDestinations.length === 0) return;
-    const currentIndex = navigationDestinations.findIndex(
-      (destination) => destinationKey(destination) === selectedDestinationKey,
+    if (activeSidebarCategories.length === 0) return;
+    const currentIndex = activeSidebarCategories.findIndex(
+      (category) => category.id === selectedSidebarCategoryId,
     );
     const nextIndex =
       currentIndex === -1
         ? 0
-        : (currentIndex + delta + navigationDestinations.length) % navigationDestinations.length;
-    setSelectedDestination(navigationDestinations[nextIndex]);
+        : (currentIndex + delta + activeSidebarCategories.length) % activeSidebarCategories.length;
+    const nextCategory = activeSidebarCategories[nextIndex];
+    if (settingsScope === "global") {
+      setSelectedGlobalCategory(nextCategory.id as SettingsCategoryId);
+    } else {
+      setSelectedProjectCategory(nextCategory.id as ProjectSettingsCategoryId);
+    }
     setPendingReset(false);
     setPendingProjectRemovalId(null);
   };
@@ -266,6 +303,14 @@ export function SettingsView({
     });
   };
 
+  const updateProjectWorkspaceCopyFiles = (value: string) => {
+    if (!selectedProject || selectedProject.kind !== "git") return;
+    onProjectSettingsChange(selectedProject.id, {
+      ...selectedProject.settings,
+      workspaceCopyFiles: value.length === 0 ? [] : value.split(/\r?\n/),
+    });
+  };
+
   const confirmResetApplication = () => {
     if (!pendingReset) {
       setPendingReset(true);
@@ -286,9 +331,11 @@ export function SettingsView({
     const nextProject =
       sortedProjects[currentIndex + 1] ?? sortedProjects[currentIndex - 1] ?? null;
     setPendingProjectRemovalId(null);
-    setSelectedDestination(
-      nextProject ? { kind: "project", id: nextProject.id } : { kind: "category", id: "general" },
-    );
+    setSelectedProjectId(nextProject?.id ?? null);
+    if (!nextProject) {
+      setSettingsScope("global");
+      setSelectedGlobalCategory("general");
+    }
     setFocusPane("left");
     onRemoveProject(selectedProject.id);
   };
@@ -323,6 +370,10 @@ export function SettingsView({
       onTilePickerVisibilityChange(itemId, !tilePickerVisibility[itemId]);
       return;
     }
+    if (activeControlId === "workspace-copy-files") {
+      workspaceCopyFilesRef.current?.focus();
+      return;
+    }
     if (activeControlId === "delete-workspace-branch-on-discard") {
       toggleProjectBranchDiscardPolicy();
       return;
@@ -344,9 +395,20 @@ export function SettingsView({
     if (delta > 0) activateControl();
   };
 
+  const switchSettingsScope = () => {
+    setSettingsScope((scope) => (scope === "global" ? "project" : "global"));
+    setFocusPane("left");
+    setPendingReset(false);
+    setPendingProjectRemovalId(null);
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
-    if (target.tagName === "INPUT") {
+    if (
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT"
+    ) {
       if (event.key === "Escape") {
         event.preventDefault();
         target.blur();
@@ -361,6 +423,12 @@ export function SettingsView({
       return;
     }
 
+    if (event.key === "Tab") {
+      event.preventDefault();
+      switchSettingsScope();
+      return;
+    }
+
     if (focusPane === "left") {
       if (event.key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
@@ -369,6 +437,13 @@ export function SettingsView({
       }
       if (event.key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
+        if (
+          settingsScope === "project" &&
+          selectedSidebarCategoryId === activeSidebarCategories[0]?.id
+        ) {
+          projectPickerRef.current?.focus();
+          return;
+        }
         moveLeftSelection(-1);
         return;
       }
@@ -406,10 +481,11 @@ export function SettingsView({
   };
 
   const selectedTitle =
-    selectedDestination.kind === "project"
-      ? (selectedProject?.name ?? "Project Settings")
-      : (settingsCategories.find((category) => category.id === selectedDestination.id)?.title ??
-        "Settings");
+    settingsScope === "global"
+      ? (settingsCategories.find((category) => category.id === selectedGlobalCategory)?.title ??
+        "Settings")
+      : (projectSettingsCategories.find((category) => category.id === selectedProjectCategory)
+          ?.title ?? "Project Settings");
 
   return (
     <section
@@ -420,7 +496,13 @@ export function SettingsView({
       tabIndex={-1}
     >
       <header className="settings-view-header" data-tauri-drag-region>
-        <h1>Settings</h1>
+        <div className="settings-view-titlebar">
+          <h1>Settings</h1>
+          <div className="settings-scope-tabs" role="tablist" aria-label="Settings scope">
+            {renderScopeTab("global", "Global")}
+            {renderScopeTab("project", "Project")}
+          </div>
+        </div>
         <button
           className="settings-close-button"
           type="button"
@@ -431,71 +513,118 @@ export function SettingsView({
         </button>
       </header>
 
-      <div className="settings-view-content">
-        <nav
-          className={["settings-sidebar", focusPane === "left" ? "settings-pane-focused" : ""].join(
-            " ",
-          )}
-          aria-label="Settings sections"
-        >
-          <div className="settings-sidebar-section">
-            {settingsCategories.map((category) =>
-              renderNavigationRow({ kind: "category", id: category.id }, category.title),
-            )}
-          </div>
-          <div className="settings-sidebar-section">
-            <div className="settings-sidebar-heading">Projects</div>
-            {!projectsLoaded ? (
-              <div className="settings-sidebar-empty">Loading projects…</div>
-            ) : null}
-            {projectsLoaded && sortedProjects.length === 0 ? (
-              <div className="settings-sidebar-empty">No projects registered.</div>
-            ) : null}
-            {sortedProjects.map((project) =>
-              renderNavigationRow({ kind: "project", id: project.id }, project.name),
-            )}
-          </div>
-        </nav>
+      <div className={`settings-view-content settings-view-content-${settingsScope}`}>
+        {settingsScope === "project" ? renderProjectPicker() : null}
+        <div className="settings-view-main">
+          <nav
+            className={[
+              "settings-sidebar",
+              focusPane === "left" ? "settings-pane-focused" : "",
+            ].join(" ")}
+            aria-label="Settings sections"
+          >
+            <div className="settings-sidebar-section">
+              {activeSidebarCategories.map((category) =>
+                renderNavigationRow(category.id, category.title),
+              )}
+            </div>
+          </nav>
 
-        <section
-          className={["settings-detail", focusPane === "right" ? "settings-pane-focused" : ""].join(
-            " ",
-          )}
-          aria-label={selectedTitle}
-        >
-          <header className="settings-detail-header">
-            <h2>{selectedTitle}</h2>
-          </header>
-          {renderDetail()}
-        </section>
+          <section
+            className={[
+              "settings-detail",
+              focusPane === "right" ? "settings-pane-focused" : "",
+            ].join(" ")}
+            aria-label={selectedTitle}
+          >
+            <header className="settings-detail-header">
+              <h2>{selectedTitle}</h2>
+            </header>
+            {renderDetail()}
+          </section>
+        </div>
       </div>
     </section>
   );
 
-  function renderNavigationRow(destination: Destination, title: string) {
-    const key = destinationKey(destination);
-    const selected = key === selectedDestinationKey;
-    const categoryIconClass =
-      destination.kind === "category" ? `settings-sidebar-icon-${destination.id}` : "";
+  function renderScopeTab(scope: SettingsScope, title: string) {
+    const selected = settingsScope === scope;
     return (
       <button
-        key={key}
-        className={[
-          "settings-sidebar-row",
-          destination.kind === "category" ? "settings-sidebar-row-category" : "",
-          selected ? "settings-sidebar-row-selected" : "",
-          selected && focusPane === "left" ? "settings-sidebar-row-focused" : "",
-        ].join(" ")}
+        className={["settings-scope-tab", selected ? "settings-scope-tab-selected" : ""].join(" ")}
         type="button"
+        role="tab"
+        aria-selected={selected}
         onClick={() => {
-          setSelectedDestination(destination);
+          setSettingsScope(scope);
           setFocusPane("left");
           setPendingReset(false);
           setPendingProjectRemovalId(null);
           viewRef.current?.focus();
         }}
       >
-        {destination.kind === "category" ? (
+        {title}
+      </button>
+    );
+  }
+
+  function renderProjectPicker() {
+    return (
+      <div className="settings-project-picker-row">
+        <label className="settings-project-picker-label" htmlFor="settings-project-picker">
+          Project
+        </label>
+        <select
+          ref={projectPickerRef}
+          id="settings-project-picker"
+          className="settings-project-picker"
+          value={selectedProjectId ?? ""}
+          disabled={!projectsLoaded || sortedProjects.length === 0}
+          onChange={(event) => {
+            setSelectedProjectId(event.currentTarget.value || null);
+            setPendingProjectRemovalId(null);
+          }}
+        >
+          {!projectsLoaded ? <option value="">Loading projects…</option> : null}
+          {projectsLoaded && sortedProjects.length === 0 ? (
+            <option value="">No projects registered</option>
+          ) : null}
+          {sortedProjects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  function renderNavigationRow(id: SettingsCategoryId | ProjectSettingsCategoryId, title: string) {
+    const selected = id === selectedSidebarCategoryId;
+    const categoryIconClass = settingsScope === "global" ? `settings-sidebar-icon-${id}` : "";
+    return (
+      <button
+        key={id}
+        className={[
+          "settings-sidebar-row",
+          settingsScope === "global" ? "settings-sidebar-row-category" : "",
+          selected ? "settings-sidebar-row-selected" : "",
+          selected && focusPane === "left" ? "settings-sidebar-row-focused" : "",
+        ].join(" ")}
+        type="button"
+        onClick={() => {
+          if (settingsScope === "global") {
+            setSelectedGlobalCategory(id as SettingsCategoryId);
+          } else {
+            setSelectedProjectCategory(id as ProjectSettingsCategoryId);
+          }
+          setFocusPane("left");
+          setPendingReset(false);
+          setPendingProjectRemovalId(null);
+          viewRef.current?.focus();
+        }}
+      >
+        {settingsScope === "global" ? (
           <span
             className={["settings-sidebar-icon", categoryIconClass].join(" ")}
             aria-hidden="true"
@@ -507,11 +636,11 @@ export function SettingsView({
   }
 
   function renderDetail() {
-    if (selectedDestination.kind === "project") return renderProjectDetail();
-    if (selectedDestination.id === "general") return renderGeneralDetail();
-    if (selectedDestination.id === "appearance") return renderAppearanceDetail();
-    if (selectedDestination.id === "tiles") return renderTilesDetail();
-    if (selectedDestination.id === "extensions") return renderExtensionsDetail();
+    if (settingsScope === "project") return renderProjectDetail();
+    if (selectedGlobalCategory === "general") return renderGeneralDetail();
+    if (selectedGlobalCategory === "appearance") return renderAppearanceDetail();
+    if (selectedGlobalCategory === "tiles") return renderTilesDetail();
+    if (selectedGlobalCategory === "extensions") return renderExtensionsDetail();
     return renderKeybindsDetail();
   }
 
@@ -880,6 +1009,14 @@ export function SettingsView({
       return <div className="settings-detail-empty">Select a Project.</div>;
     }
 
+    if (selectedProjectCategory === "overview") return renderProjectOverviewDetail();
+    if (selectedProjectCategory === "workspaces") return renderProjectWorkspacesDetail();
+    return renderProjectDangerDetail();
+  }
+
+  function renderProjectOverviewDetail() {
+    if (!selectedProject) return null;
+
     return (
       <div className="settings-detail-body">
         <div className="settings-project-summary">
@@ -906,23 +1043,45 @@ export function SettingsView({
             </span>
           </div>
         </div>
+      </div>
+    );
+  }
 
-        {selectedProject.kind === "git" ? (
-          renderToggleRow({
-            id: "delete-workspace-branch-on-discard",
-            title: "Delete local branch when discarding workspace",
-            description:
-              "When enabled, discarding a git-backed Workspace also deletes its local Workspace Branch when git says it is safe. Remote branches are never deleted automatically.",
-            checked: selectedProject.settings.deleteWorkspaceBranchOnDiscard,
-            onChange: () => toggleProjectBranchDiscardPolicy(),
-          })
-        ) : (
-          <div className="settings-detail-note">
-            This Project is not git-backed, so Git workspace settings do not apply.
-          </div>
-        )}
+  function renderProjectWorkspacesDetail() {
+    if (!selectedProject) return null;
 
-        <div className="settings-danger-zone" aria-label="Project Danger Zone">
+    if (selectedProject.kind !== "git") {
+      return (
+        <div className="settings-detail-note">
+          This Project is not git-backed, so Git workspace settings do not apply.
+        </div>
+      );
+    }
+
+    return (
+      <div className="settings-detail-body">
+        {renderWorkspaceCopyFilesControl()}
+        {renderToggleRow({
+          id: "delete-workspace-branch-on-discard",
+          title: "Delete local branch when discarding workspace",
+          description:
+            "When enabled, discarding a git-backed Workspace also deletes its local Workspace Branch when git says it is safe. Remote branches are never deleted automatically.",
+          checked: selectedProject.settings.deleteWorkspaceBranchOnDiscard,
+          onChange: () => toggleProjectBranchDiscardPolicy(),
+        })}
+      </div>
+    );
+  }
+
+  function renderProjectDangerDetail() {
+    if (!selectedProject) return null;
+
+    return (
+      <div className="settings-detail-body">
+        <div
+          className="settings-danger-zone settings-danger-zone-flush"
+          aria-label="Project Danger Zone"
+        >
           <span className="settings-section-title">Danger Zone</span>
           {renderActionRow({
             id: "disconnect-project",
@@ -935,6 +1094,40 @@ export function SettingsView({
           })}
         </div>
       </div>
+    );
+  }
+
+  function renderWorkspaceCopyFilesControl() {
+    if (!selectedProject || selectedProject.kind !== "git") return null;
+    const active = activeControlId === "workspace-copy-files" && focusPane === "right";
+
+    return (
+      <label
+        className={[
+          "settings-row",
+          "settings-textarea-row",
+          active ? "settings-row-active" : "",
+        ].join(" ")}
+        onClick={() => setActiveControlId("workspace-copy-files")}
+      >
+        <span className="settings-row-copy">
+          <span className="settings-row-title">Files copied into new Workspaces</span>
+          <span className="settings-row-description">
+            One Project-root-relative file per line. New git-backed Workspaces copy these files
+            before opening, preserving relative paths.
+          </span>
+        </span>
+        <textarea
+          ref={workspaceCopyFilesRef}
+          className="settings-textarea-control"
+          value={(selectedProject.settings.workspaceCopyFiles ?? []).join("\n")}
+          placeholder={".env\nconfig/local.json"}
+          rows={4}
+          spellCheck={false}
+          onFocus={() => setActiveControlId("workspace-copy-files")}
+          onChange={(event) => updateProjectWorkspaceCopyFiles(event.target.value)}
+        />
+      </label>
     );
   }
 

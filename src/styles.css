@@ -1095,16 +1095,89 @@ body {
   background: var(--background);
 }
 
+.settings-view-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 .settings-view-header h1 {
   margin: 0;
   font-size: var(--font-size-lg);
   font-weight: 700;
 }
 
+.settings-scope-tabs {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.settings-scope-tab {
+  border: 0;
+  border-right: 1px solid var(--border);
+  padding: 0.3rem 0.75rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.settings-scope-tab:last-child {
+  border-right: 0;
+}
+
+.settings-scope-tab:hover,
+.settings-scope-tab-selected {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
 .settings-view-content {
+  display: grid;
+  min-height: 0;
+}
+
+.settings-view-content-global {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.settings-view-content-project {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.settings-view-main {
   display: grid;
   grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
   min-height: 0;
+}
+
+.settings-project-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+
+.settings-project-picker-label {
+  color: var(--muted-foreground);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.settings-project-picker {
+  min-width: min(360px, 60vw);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.55rem;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--font-size-sm);
 }
 
 .settings-sidebar {
@@ -1368,6 +1441,29 @@ body {
   gap: 0.75rem;
 }
 
+.settings-textarea-row {
+  align-items: stretch;
+}
+
+.settings-textarea-control {
+  min-width: 18rem;
+  max-width: 28rem;
+  min-height: 5.5rem;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.settings-textarea-control:focus {
+  outline: 1px solid var(--ring);
+}
+
 .settings-value {
   min-width: 36px;
   color: var(--muted-foreground);
@@ -1399,6 +1495,10 @@ body {
   display: grid;
   gap: 0.4rem;
   margin-top: 0.75rem;
+}
+
+.settings-danger-zone-flush {
+  margin-top: 0;
 }
 
 .settings-section-title {

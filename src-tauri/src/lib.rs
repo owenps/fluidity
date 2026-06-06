@@ -40,8 +40,9 @@ const APP_STATE_FILE: &str = "app-state.json";
 const APP_STATE_VERSION: u32 = 1;
 const GRID_COLUMNS: i32 = 12;
 const GRID_ROWS: i32 = 8;
-const MIN_TILE_WIDTH: i32 = 3;
-const MIN_TILE_HEIGHT: i32 = 2;
+const GRID_MIN_TILE_WIDTH: i32 = 1;
+const GRID_MIN_TILE_HEIGHT: i32 = 1;
+const DEFAULT_WORKSPACE_TILE_WIDTH: i32 = 3;
 
 struct WorkspaceState {
     state_path: PathBuf,
@@ -129,6 +130,8 @@ impl Default for AppSettings {
 struct ProjectSettings {
     #[serde(default)]
     delete_workspace_branch_on_discard: bool,
+    #[serde(default)]
+    workspace_copy_files: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1611,6 +1614,13 @@ fn create_git_workspace(
         .generated_workspace_branch_names
         .push(branch.clone());
 
+    copy_configured_workspace_files(
+        Path::new(&project.root),
+        &workspace_root,
+        &project.settings.workspace_copy_files,
+        warnings,
+    );
+
     let git_branch = observed_git_branch(ProjectKind::Git, &workspace_root_string)
         .unwrap_or_else(|| branch.clone());
 
@@ -1625,8 +1635,128 @@ fn create_git_workspace(
     })
 }
 
+fn copy_configured_workspace_files(
+    project_root: &Path,
+    workspace_root: &Path,
+    configured_files: &[String],
+    warnings: &mut Vec<String>,
+) {
+    if configured_files.is_empty() {
+        return;
+    }
+
+    let mut copied_paths = HashSet::new();
+    for configured_file in configured_files {
+        let configured_file = configured_file.trim();
+        if configured_file.is_empty() {
+            continue;
+        }
+
+        let (display_path, relative_path) = match workspace_copy_relative_path(configured_file) {
+            Ok(path) => path,
+            Err(error) => {
+                warnings.push(format!(
+                    "Workspace copy file `{configured_file}` was not copied: {error}."
+                ));
+                continue;
+            }
+        };
+
+        if !copied_paths.insert(display_path.clone()) {
+            continue;
+        }
+
+        copy_workspace_file(
+            project_root,
+            workspace_root,
+            &display_path,
+            &relative_path,
+            warnings,
+        );
+    }
+}
+
+fn workspace_copy_relative_path(configured_file: &str) -> Result<(String, PathBuf), String> {
+    let path = Path::new(configured_file);
+    if path.is_absolute() {
+        return Err("path must be relative to the Project root".to_string());
+    }
+
+    let mut relative_path = PathBuf::new();
+    let mut display_parts = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => {
+                relative_path.push(part);
+                display_parts.push(part.to_string_lossy().to_string());
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                return Err("path must stay inside the Project root".to_string());
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err("path must be relative to the Project root".to_string());
+            }
+        }
+    }
+
+    if display_parts.is_empty() {
+        return Err("path must name a file".to_string());
+    }
+
+    Ok((display_parts.join("/"), relative_path))
+}
+
+fn copy_workspace_file(
+    project_root: &Path,
+    workspace_root: &Path,
+    display_path: &str,
+    relative_path: &Path,
+    warnings: &mut Vec<String>,
+) {
+    let source = project_root.join(relative_path);
+    let destination = workspace_root.join(relative_path);
+    let metadata = match fs::metadata(&source) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            warnings.push(format!(
+                "Workspace copy file `{display_path}` was not copied because it does not exist under the Project root."
+            ));
+            return;
+        }
+        Err(error) => {
+            warnings.push(format!(
+                "Workspace copy file `{display_path}` was not copied because it could not be read: {error}."
+            ));
+            return;
+        }
+    };
+
+    if !metadata.is_file() {
+        warnings.push(format!(
+            "Workspace copy file `{display_path}` was not copied because it is not a file."
+        ));
+        return;
+    }
+
+    if let Some(parent) = destination.parent() {
+        if let Err(error) = fs::create_dir_all(parent) {
+            warnings.push(format!(
+                "Workspace copy file `{display_path}` was not copied because its Workspace directory could not be created: {error}."
+            ));
+            return;
+        }
+    }
+
+    if let Err(error) = fs::copy(&source, &destination) {
+        warnings.push(format!(
+            "Workspace copy file `{display_path}` was not copied because it could not be copied: {error}."
+        ));
+    }
+}
+
 fn default_workspace_tile_state() -> WorkspaceTileState {
-    let workspace_tile_width = MIN_TILE_WIDTH;
+    let workspace_tile_width = DEFAULT_WORKSPACE_TILE_WIDTH;
 
     WorkspaceTileState {
         tiles: vec![
@@ -2527,8 +2657,8 @@ fn is_valid_segmented_id(id: &str, min_len: usize, max_len: usize, separators: &
 fn is_valid_tile_geometry(tile: &PersistedTile) -> bool {
     tile.x >= 0
         && tile.y >= 0
-        && tile.w >= MIN_TILE_WIDTH
-        && tile.h >= MIN_TILE_HEIGHT
+        && tile.w >= GRID_MIN_TILE_WIDTH
+        && tile.h >= GRID_MIN_TILE_HEIGHT
         && tile.x + tile.w <= GRID_COLUMNS
         && tile.y + tile.h <= GRID_ROWS
 }
@@ -3405,6 +3535,121 @@ mod tests {
     use super::*;
 
     #[test]
+    fn copy_configured_workspace_files_preserves_relative_paths_and_warnings() {
+        let temp_dir = test_temp_dir("fluidity-workspace-copy-helper");
+        let project_root = temp_dir.join("project");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(project_root.join("config")).unwrap();
+        fs::create_dir_all(&workspace_root).unwrap();
+        fs::write(project_root.join(".env"), "API_TOKEN=secret\n").unwrap();
+        fs::write(project_root.join("config").join("local.txt"), "reference\n").unwrap();
+
+        let mut warnings = Vec::new();
+        copy_configured_workspace_files(
+            &project_root,
+            &workspace_root,
+            &[
+                ".env".to_string(),
+                "config/local.txt".to_string(),
+                "missing.txt".to_string(),
+                "../outside.txt".to_string(),
+            ],
+            &mut warnings,
+        );
+
+        assert_eq!(
+            fs::read_to_string(workspace_root.join(".env")).unwrap(),
+            "API_TOKEN=secret\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace_root.join("config").join("local.txt")).unwrap(),
+            "reference\n"
+        );
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("missing.txt")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("../outside.txt")));
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn git_workspace_creation_copies_configured_project_files() {
+        let temp_dir = test_temp_dir("fluidity-workspace-copy-create");
+        let app_data_dir = temp_dir.join("app-data");
+        let project_root = temp_dir.join("project");
+        fs::create_dir_all(&app_data_dir).unwrap();
+        fs::create_dir_all(&project_root).unwrap();
+
+        test_command(&project_root, &["git", "init"]);
+        let project_root_string = path_to_string(&project_root);
+        run_git_command(
+            &project_root_string,
+            &["config", "user.email", "test@example.com"],
+        )
+        .unwrap();
+        run_git_command(&project_root_string, &["config", "user.name", "Test User"]).unwrap();
+        fs::write(project_root.join("README.md"), "tracked\n").unwrap();
+        fs::write(project_root.join(".gitignore"), ".env\nlocal/\n").unwrap();
+        run_git_command(&project_root_string, &["add", "README.md", ".gitignore"]).unwrap();
+        run_git_command(&project_root_string, &["commit", "-m", "initial"]).unwrap();
+        run_git_command(&project_root_string, &["branch", "-M", "main"]).unwrap();
+        run_git_command(
+            &project_root_string,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        )
+        .unwrap();
+        run_git_command(
+            &project_root_string,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        )
+        .unwrap();
+
+        fs::create_dir_all(project_root.join("local")).unwrap();
+        fs::write(project_root.join(".env"), "API_TOKEN=secret\n").unwrap();
+        fs::write(
+            project_root.join("local").join("reference.txt"),
+            "reference\n",
+        )
+        .unwrap();
+
+        let project = RegisteredProject {
+            id: "project-1".to_string(),
+            name: "Project".to_string(),
+            root: project_root_string,
+            kind: ProjectKind::Git,
+            settings: ProjectSettings {
+                workspace_copy_files: vec![".env".to_string(), "local/reference.txt".to_string()],
+                ..ProjectSettings::default()
+            },
+        };
+        let mut app_state = PersistedAppState::default();
+        let mut warnings = Vec::new();
+
+        let workspace =
+            create_git_workspace(&app_data_dir, &mut app_state, &project, &mut warnings)
+                .expect("git workspace should be created");
+
+        let workspace_root = PathBuf::from(workspace.root);
+        assert_eq!(
+            fs::read_to_string(workspace_root.join(".env")).unwrap(),
+            "API_TOKEN=secret\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace_root.join("local").join("reference.txt")).unwrap(),
+            "reference\n"
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     fn terminal_launch_plan_assigns_resume_for_preassignable_tools() {
         for tool_id in ["claude", "gemini", "pi"] {
             let plan = terminal_launch_plan(&tool_launch(tool_id, None)).unwrap();
@@ -3579,9 +3824,9 @@ mod tests {
         let terminal = &tile_state.tiles[0];
         assert_eq!(terminal.kind, "terminal");
         assert_eq!(terminal.title, "Terminal");
-        assert_eq!(terminal.x, MIN_TILE_WIDTH);
+        assert_eq!(terminal.x, DEFAULT_WORKSPACE_TILE_WIDTH);
         assert_eq!(terminal.y, 0);
-        assert_eq!(terminal.w, GRID_COLUMNS - MIN_TILE_WIDTH);
+        assert_eq!(terminal.w, GRID_COLUMNS - DEFAULT_WORKSPACE_TILE_WIDTH);
         assert_eq!(terminal.h, GRID_ROWS);
 
         let workspace = &tile_state.tiles[1];
@@ -3589,7 +3834,7 @@ mod tests {
         assert_eq!(workspace.title, "Workspaces");
         assert_eq!(workspace.x, 0);
         assert_eq!(workspace.y, 0);
-        assert_eq!(workspace.w, MIN_TILE_WIDTH);
+        assert_eq!(workspace.w, DEFAULT_WORKSPACE_TILE_WIDTH);
         assert_eq!(workspace.h, GRID_ROWS);
     }
 
@@ -3690,8 +3935,8 @@ mod tests {
                 initial_command: None,
                 x: 0,
                 y: 0,
-                w: MIN_TILE_WIDTH,
-                h: MIN_TILE_HEIGHT,
+                w: GRID_MIN_TILE_WIDTH,
+                h: GRID_MIN_TILE_HEIGHT,
             }],
         };
 
@@ -3918,8 +4163,8 @@ mod tests {
             initial_command: Some(initial_command.to_string()),
             x: 0,
             y: 0,
-            w: MIN_TILE_WIDTH,
-            h: MIN_TILE_HEIGHT,
+            w: GRID_MIN_TILE_WIDTH,
+            h: GRID_MIN_TILE_HEIGHT,
         }
     }
 
@@ -3936,8 +4181,8 @@ mod tests {
             initial_command: None,
             x: 0,
             y: 0,
-            w: MIN_TILE_WIDTH,
-            h: MIN_TILE_HEIGHT,
+            w: GRID_MIN_TILE_WIDTH,
+            h: GRID_MIN_TILE_HEIGHT,
         }
     }
 
@@ -3950,6 +4195,20 @@ mod tests {
     fn write_extension_manifest(extension_dir: &Path, manifest: &str) {
         fs::create_dir_all(extension_dir).unwrap();
         fs::write(extension_dir.join(EXTENSION_DEFINITION_FILE), manifest).unwrap();
+    }
+
+    fn test_command(cwd: &Path, args: &[&str]) {
+        let output = Command::new(args[0])
+            .current_dir(cwd)
+            .args(&args[1..])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     fn test_workspace_state(
