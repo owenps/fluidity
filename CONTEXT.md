@@ -24,6 +24,10 @@ _Avoid_: Window, session, branch
 A Workspace for a Git-backed Project whose canonical filesystem root is an isolated git worktree and whose changes belong to its Workspace Branch.
 _Avoid_: Checkout, clone, branch
 
+**Non-Git Workspace**:
+A Workspace for a Project that is not backed by git, whose canonical filesystem root is the Project root. A Project can have multiple Non-Git Workspaces that share the same filesystem root while keeping distinct Workspace identities and Workspace Tile State.
+_Avoid_: View, layout, session, non-git tab
+
 **Open Workspace**:
 A workspace currently present in Fluidity whether or not it is the one currently shown to the user. Open Workspaces are parallel working environments, not stopped sessions waiting to be resumed.
 _Avoid_: Tab, window, session
@@ -65,7 +69,7 @@ The branch or remote-tracking ref used as the starting point for a new Git-backe
 _Avoid_: Starting branch, parent branch, source branch
 
 **Home Workspace**:
-The default workspace for a project that is not backed by git, rooted at the project root.
+The initial Workspace for a Project that is not backed by git, rooted at the Project root.
 _Avoid_: Main workspace, default workspace
 
 **Discarded Workspace**:
@@ -89,8 +93,12 @@ A known way for Fluidity to turn Tile Resume Metadata into launch or resume beha
 _Avoid_: Backend, resumable backend, session manager
 
 **Workspace Grid**:
-The fixed-cell surface inside a workspace where tiles are placed without overlap.
+The Fluidity Core-owned fixed-cell surface inside a workspace where tiles are placed without overlap.
 _Avoid_: Canvas, window manager, freeform layout
+
+**Workspace Composition**:
+The act of creating, arranging, focusing, and removing Tiles in a Workspace to show the right work surfaces for a task.
+_Avoid_: Window management, desktop tiling, layout automation
 
 **Browser Tile**:
 A tile for viewing and interacting with web pages from inside a workspace.
@@ -191,6 +199,18 @@ _Avoid_: Package name, plugin id, source path
 **Extension Point**:
 A supported kind of contribution that an Extension can add to Fluidity.
 _Avoid_: Hook, API endpoint, customization seam
+
+**Active Extension Point**:
+An Extension Point that can cause Fluidity to do work after installation, such as handling Commands, running schedules, accepting alternate input, reacting to Workspace lifecycle events, or composing Workspaces through Fluidity APIs.
+_Avoid_: Background plugin, automation hook, extension daemon
+
+**Executable Extension Module**:
+An optional executable component of an Extension, declared by its Extension Definition, used only for Extension Points that require runtime behavior beyond static data.
+_Avoid_: Plugin runtime, extension script, code manifest
+
+**Extension Host**:
+A supervised process or sandbox outside Fluidity Core that runs approved Executable Extension Modules through a narrow Fluidity API.
+_Avoid_: Plugin loader, extension process, script runner
 
 **Integration Tile Contribution**:
 An Extension Point for adding an Integration Tile to Fluidity.
