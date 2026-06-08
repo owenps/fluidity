@@ -1,5 +1,14 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { CodeEditorTile, type CodeEditorOpenFileRequest } from "./CodeEditorTile";
 import { commandIdForKeyboardEvent, createCommands, type AppCommandApi } from "./commands";
 import { KeyCap } from "./KeyCap";
@@ -111,6 +120,21 @@ function toolTileResolves(tile: Tile, catalogItems: ConfigurableTilePickerCatalo
 function integrationTileIdentity(tile: Tile): string {
   if (tile.kind !== "tool") return tile.kind;
   return `${tile.extensionId}:${tile.integrationId}.${tile.integrationTileId}`;
+}
+
+function startWindowDrag(event: ReactMouseEvent<HTMLElement>) {
+  if (event.button !== 0) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest("button,a,input,textarea,select,[role='button']")) return;
+
+  try {
+    void getCurrentWindow()
+      .startDragging()
+      .catch(() => undefined);
+  } catch {
+    // No-op outside Tauri.
+  }
 }
 
 function UnavailableIntegrationTile({ tile }: { tile: Tile }) {
@@ -1055,7 +1079,7 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <header className="top-bar" data-tauri-drag-region>
+      <header className="top-bar" data-tauri-drag-region onMouseDown={startWindowDrag}>
         <div className="traffic-light-spacer" data-tauri-drag-region />
         <div className="scope" data-tauri-drag-region>
           <span>{projectName}</span>
