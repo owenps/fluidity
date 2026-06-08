@@ -1,3 +1,4 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_NAME } from "./appConstants";
 import { themeOptions, type ThemeId } from "./themeRegistry";
@@ -200,6 +201,7 @@ export function SettingsView({
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(lastSelectedProjectId);
   const [activeControlId, setActiveControlId] = useState("debug-layout");
   const [tilePickerQuery, setTilePickerQuery] = useState("");
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const tilePickerPageSelected = settingsScope === "global" && selectedGlobalCategory === "tiles";
   const tilePickerPageSelectedRef = useRef(tilePickerPageSelected);
   const [tilePickerDisplayItems, setTilePickerDisplayItems] = useState(() =>
@@ -238,6 +240,12 @@ export function SettingsView({
     if (!query) return tilePickerDisplayItems;
     return tilePickerDisplayItems.filter((item) => item.title.toLowerCase().includes(query));
   }, [tilePickerDisplayItems, tilePickerQuery]);
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion("Unknown"));
+  }, []);
 
   useEffect(() => {
     const wasTilePickerPageSelected = tilePickerPageSelectedRef.current;
@@ -721,6 +729,17 @@ export function SettingsView({
   function renderGeneralDetail() {
     return (
       <div className="settings-detail-body">
+        <div className="settings-row">
+          <span className="settings-row-copy">
+            <span className="settings-row-title">Version</span>
+            <span className="settings-row-description">
+              Current {APP_NAME} application version.
+            </span>
+          </span>
+          <span className="settings-row-control">
+            <span className="settings-value">{appVersion ?? "Loading…"}</span>
+          </span>
+        </div>
         {renderToggleRow({
           id: "debug-layout",
           title: "Debug mode",
