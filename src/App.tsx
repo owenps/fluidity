@@ -10,6 +10,12 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { CodeEditorTile, type CodeEditorOpenFileRequest } from "./CodeEditorTile";
+import {
+  applyThemeToDocument,
+  onSystemThemeChange,
+  resolvedThemeId as resolveThemeId,
+  type ThemeId,
+} from "./themeRegistry";
 import { commandIdForKeyboardEvent, createCommands, type AppCommandApi } from "./commands";
 import { KeyCap } from "./KeyCap";
 import { Picker, PickerShortcutHint, PickerShortcutSeparator, type PickerItem } from "./Picker";
@@ -224,6 +230,7 @@ export function App() {
   const {
     debugLayout,
     terminalFontSize,
+    themeId,
     tileHeadersVisible,
     deletionPositiveStatColors,
     tilePickerVisibility,
@@ -233,6 +240,16 @@ export function App() {
   const previousTileRuntimeOwnersRef = useRef<{ workspaceId: string | null; tileIds: Set<string> }>(
     { workspaceId: null, tileIds: new Set() },
   );
+  const [resolvedThemeId, setResolvedThemeId] = useState(() => resolveThemeId(themeId));
+
+  useEffect(() => {
+    const applyTheme = () => {
+      applyThemeToDocument(themeId);
+      setResolvedThemeId(resolveThemeId(themeId));
+    };
+    applyTheme();
+    return onSystemThemeChange(applyTheme);
+  }, [themeId]);
 
   useEffect(() => {
     layoutRef.current = layout;
@@ -902,6 +919,10 @@ export function App() {
     updateSettings((previous) => ({ ...previous, terminalFontSize }));
   };
 
+  const setThemeSetting = (themeId: ThemeId) => {
+    updateSettings((previous) => ({ ...previous, themeId }));
+  };
+
   const setTileHeadersVisibleSetting = (tileHeadersVisible: boolean) => {
     updateSettings((previous) => ({ ...previous, tileHeadersVisible }));
   };
@@ -1174,6 +1195,7 @@ export function App() {
                       <CodeEditorTile
                         active={focused}
                         workspaceId={currentWorkspaceId ?? ""}
+                        themeId={resolvedThemeId}
                         openFileRequest={codeEditorOpenFileRequests[tile.id]}
                       />
                     ) : tile.kind === "tool" && !integrationCatalogLoaded ? (
@@ -1189,6 +1211,7 @@ export function App() {
                         active={focused}
                         launch={terminalLaunchForTile(tile)}
                         terminalFontSize={terminalFontSize}
+                        themeId={resolvedThemeId}
                         onResumeAssigned={(resume) => assignTileResume(tile.id, resume)}
                       />
                     ) : (
@@ -1218,6 +1241,8 @@ export function App() {
           onDebugLayoutChange={setDebugLayoutSetting}
           terminalFontSize={terminalFontSize}
           onTerminalFontSizeChange={setTerminalFontSizeSetting}
+          themeId={themeId}
+          onThemeChange={setThemeSetting}
           tileHeadersVisible={tileHeadersVisible}
           onTileHeadersVisibleChange={setTileHeadersVisibleSetting}
           deletionPositiveStatColors={deletionPositiveStatColors}

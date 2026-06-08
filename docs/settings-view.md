@@ -39,7 +39,10 @@ Application Reset returns Fluidity to its unregistered starting state: Settings 
 Appearance contains visual presentation Settings:
 
 - Terminal font size
+- Theme
 - Deletion-positive stats
+
+The built-in theme registry exposes Light and Dark. Themes carry app-level color tokens, terminal colors, and Monaco editor colors so future Extension-contributed themes can plug into the same picker.
 
 ### Tiles
 

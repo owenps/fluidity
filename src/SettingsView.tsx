@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_NAME } from "./appConstants";
+import { themeOptions, type ThemeId } from "./themeRegistry";
 import { keyboardShortcutGroups } from "./commands";
 import { KeyChord } from "./KeyCap";
 import { Slider } from "./Slider";
@@ -47,6 +48,8 @@ interface SettingsViewProps {
   onDebugLayoutChange: (enabled: boolean) => void;
   terminalFontSize: number;
   onTerminalFontSizeChange: (fontSize: number) => void;
+  themeId: ThemeId;
+  onThemeChange: (themeId: ThemeId) => void;
   tileHeadersVisible: boolean;
   onTileHeadersVisibleChange: (visible: boolean) => void;
   deletionPositiveStatColors: boolean;
@@ -107,7 +110,9 @@ function controlIdsForSelection(
 ) {
   if (scope === "global") {
     if (globalCategory === "general") return ["debug-layout", "reset-application"];
-    if (globalCategory === "appearance") return ["terminal-font-size", "workspace-stat-colors"];
+    if (globalCategory === "appearance") {
+      return ["terminal-font-size", "app-theme", "workspace-stat-colors"];
+    }
     if (globalCategory === "tiles") {
       return [
         "tile-headers",
@@ -138,6 +143,8 @@ export function SettingsView({
   onDebugLayoutChange,
   terminalFontSize,
   onTerminalFontSizeChange,
+  themeId,
+  onThemeChange,
   tileHeadersVisible,
   onTileHeadersVisibleChange,
   deletionPositiveStatColors,
@@ -163,6 +170,7 @@ export function SettingsView({
   const viewRef = useRef<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const projectPickerRef = useRef<HTMLSelectElement | null>(null);
+  const themeRef = useRef<HTMLSelectElement | null>(null);
   const workspaceCopyFilesRef = useRef<HTMLTextAreaElement | null>(null);
   const projectSearchIncludesRef = useRef<HTMLTextAreaElement | null>(null);
   const projectSearchExcludesRef = useRef<HTMLTextAreaElement | null>(null);
@@ -382,6 +390,10 @@ export function SettingsView({
     }
     if (activeControlId === "tile-picker-search") {
       searchRef.current?.focus();
+      return;
+    }
+    if (activeControlId === "app-theme") {
+      themeRef.current?.focus();
       return;
     }
     if (activeControlId.startsWith("tile-picker:")) {
@@ -725,6 +737,34 @@ export function SettingsView({
               onValueChange={changeTerminalFontSize}
             />
             <span className="settings-value">{terminalFontSize}px</span>
+          </span>
+        </label>
+        <label
+          className={[
+            "settings-row",
+            activeControlId === "app-theme" && focusPane === "right" ? "settings-row-active" : "",
+          ].join(" ")}
+          onMouseEnter={() => setActiveControlId("app-theme")}
+          onFocus={() => setActiveControlId("app-theme")}
+        >
+          <span className="settings-row-copy">
+            <span className="settings-row-title">Theme</span>
+            <span className="settings-row-description">Follow system, or choose Light/Dark.</span>
+          </span>
+          <span className="settings-row-control">
+            <select
+              ref={themeRef}
+              className="settings-select-control"
+              value={themeId}
+              onFocus={() => setActiveControlId("app-theme")}
+              onChange={(event) => onThemeChange(event.currentTarget.value as ThemeId)}
+            >
+              {themeOptions().map((theme) => (
+                <option key={theme.id} value={theme.id}>
+                  {theme.title}
+                </option>
+              ))}
+            </select>
           </span>
         </label>
         {renderToggleRow({

@@ -60,6 +60,7 @@ const GRID_MIN_TILE_HEIGHT: i32 = 1;
 const DEFAULT_WORKSPACE_TILE_WIDTH: i32 = 3;
 const CODE_FILE_SIZE_LIMIT_BYTES: u64 = 2 * 1024 * 1024;
 const PROJECT_FILE_INDEX_LIMIT: usize = 20_000;
+const DEFAULT_THEME_ID: &str = "system";
 
 struct WorkspaceState {
     state_path: PathBuf,
@@ -124,10 +125,16 @@ impl Default for PersistedAppState {
 struct AppSettings {
     debug_layout: bool,
     terminal_font_size: f64,
+    #[serde(default = "default_theme_id", alias = "codeEditorThemeId")]
+    theme_id: String,
     tile_headers_visible: bool,
     deletion_positive_stat_colors: bool,
     #[serde(default)]
     tile_picker_visibility: HashMap<String, bool>,
+}
+
+fn default_theme_id() -> String {
+    DEFAULT_THEME_ID.to_string()
 }
 
 impl Default for AppSettings {
@@ -135,6 +142,7 @@ impl Default for AppSettings {
         Self {
             debug_layout: false,
             terminal_font_size: 13.0,
+            theme_id: default_theme_id(),
             tile_headers_visible: true,
             deletion_positive_stat_colors: false,
             tile_picker_visibility: HashMap::new(),

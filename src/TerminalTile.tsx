@@ -12,6 +12,7 @@ interface TerminalTileProps {
   cwd: string;
   active: boolean;
   terminalFontSize: number;
+  themeId: string;
   launch: TerminalLaunch;
   onResumeAssigned: (resume: TileResumeMetadata) => void;
 }
@@ -22,6 +23,7 @@ export function TerminalTile({
   cwd,
   active,
   terminalFontSize,
+  themeId,
   launch,
   onResumeAssigned,
 }: TerminalTileProps) {
@@ -67,6 +69,10 @@ export function TerminalTile({
   useEffect(() => {
     runtimeRef.current?.setTerminalFontSize(terminalFontSize);
   }, [terminalFontSize]);
+
+  useEffect(() => {
+    runtimeRef.current?.setTheme();
+  }, [themeId]);
 
   useEffect(() => {
     runtimeRef.current?.setActive(active);

@@ -4,6 +4,7 @@ import "monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import "monaco-editor/min/vs/editor/editor.main.css";
 import { VimMode, initVimMode, type VimAdapterInstance } from "monaco-vim";
+import { registerCodeEditorThemes, type ThemeId } from "./themeRegistry";
 import { readCodeFile, writeCodeFile } from "./codeFileClient";
 
 globalThis.MonacoEnvironment = {
@@ -61,10 +62,12 @@ function registerVimWriteCommand() {
 export function CodeEditorTile({
   active,
   workspaceId,
+  themeId,
   openFileRequest,
 }: {
   active: boolean;
   workspaceId: string;
+  themeId: ThemeId;
   openFileRequest?: CodeEditorOpenFileRequest;
 }) {
   const editorHostRef = useRef<HTMLDivElement | null>(null);
@@ -112,20 +115,7 @@ export function CodeEditorTile({
   useEffect(() => {
     if (!editorHostRef.current) return;
 
-    monaco.editor.defineTheme("fluidity-code-editor", {
-      base: "vs-dark",
-      inherit: true,
-      rules: [],
-      colors: {
-        "editor.background": "#0a0a0a",
-        "editor.foreground": "#fafafa",
-        "editorLineNumber.foreground": "#737373",
-        "editorCursor.foreground": "#9bc6ff",
-        "editor.selectionBackground": "#264f78",
-        "editor.inactiveSelectionBackground": "#1f3b57",
-      },
-    });
-
+    registerCodeEditorThemes(monaco.editor);
     registerVimWriteCommand();
 
     const saveActiveEditor = () => {
@@ -150,7 +140,7 @@ export function CodeEditorTile({
       renderWhitespace: "selection",
       scrollBeyondLastLine: false,
       tabSize: 2,
-      theme: "fluidity-code-editor",
+      theme: themeId,
       wordWrap: "on",
     });
     editorRef.current = editor;
@@ -181,6 +171,10 @@ export function CodeEditorTile({
       editorRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    monaco.editor.setTheme(themeId);
+  }, [themeId]);
 
   useEffect(() => {
     if (active) editorRef.current?.focus();

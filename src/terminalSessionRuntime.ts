@@ -24,6 +24,7 @@ interface TerminalSessionRuntimeOptions {
 export interface TerminalSessionRuntime {
   setActive(active: boolean): void;
   setTerminalFontSize(fontSize: number): void;
+  setTheme(): void;
   setOnResumeAssigned(onResumeAssigned: (resume: TileResumeMetadata) => void): void;
   detach(host: HTMLElement): void;
 }
@@ -215,6 +216,12 @@ class BrowserTerminalSessionRuntime implements TerminalSessionRuntime {
     this.onResumeAssigned = onResumeAssigned;
   }
 
+  setTheme() {
+    if (this.disposed) return;
+    this.terminal.options.theme = terminalTheme();
+    this.terminal.refresh(0, this.terminal.rows - 1);
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -285,29 +292,33 @@ function createXterm(terminalFontSize: number): Terminal {
     fontSize: terminalFontSize,
     lineHeight: 1.15,
     allowProposedApi: true,
-    theme: {
-      background: cssVariable("--background"),
-      foreground: cssVariable("--foreground"),
-      cursor: cssVariable("--primary"),
-      selectionBackground: cssVariable("--accent"),
-      black: "#0a0a0a",
-      red: "#ff6467",
-      green: "#a3e635",
-      yellow: "#facc15",
-      blue: "#93c5fd",
-      magenta: "#ffc0cb",
-      cyan: "#67e8f9",
-      white: "#fafafa",
-      brightBlack: "#737373",
-      brightRed: "#ff6467",
-      brightGreen: "#bef264",
-      brightYellow: "#fde047",
-      brightBlue: "#bfdbfe",
-      brightMagenta: "#ffc0cb",
-      brightCyan: "#a5f3fc",
-      brightWhite: "#ffffff",
-    },
+    theme: terminalTheme(),
   });
+}
+
+function terminalTheme() {
+  return {
+    background: cssVariable("--background"),
+    foreground: cssVariable("--foreground"),
+    cursor: cssVariable("--primary"),
+    selectionBackground: cssVariable("--accent"),
+    black: "#0a0a0a",
+    red: "#ff6467",
+    green: "#22c55e",
+    yellow: "#ca8a04",
+    blue: "#0969da",
+    magenta: "#8250df",
+    cyan: "#0891b2",
+    white: "#f6f8fa",
+    brightBlack: "#6e7681",
+    brightRed: "#ff6467",
+    brightGreen: "#16a34a",
+    brightYellow: "#facc15",
+    brightBlue: "#58a6ff",
+    brightMagenta: "#d2a8ff",
+    brightCyan: "#67e8f9",
+    brightWhite: "#ffffff",
+  };
 }
 
 function cssVariable(name: string): string {

@@ -1,3 +1,4 @@
+import { defaultThemeId, normalizeThemeId, type ThemeId } from "./themeRegistry";
 import {
   createDefaultTilePickerVisibility,
   defaultConfigurableTilePickerItems,
@@ -10,6 +11,7 @@ const terminalFontSizeMax = 24;
 export interface AppSettings {
   debugLayout: boolean;
   terminalFontSize: number;
+  themeId: ThemeId;
   tileHeadersVisible: boolean;
   deletionPositiveStatColors: boolean;
   tilePickerVisibility: TilePickerVisibility;
@@ -19,6 +21,7 @@ export function createDefaultAppSettings(debugLayout = false): AppSettings {
   return {
     debugLayout,
     terminalFontSize: 13,
+    themeId: defaultThemeId,
     tileHeadersVisible: true,
     deletionPositiveStatColors: false,
     tilePickerVisibility: createDefaultTilePickerVisibility(),
@@ -27,12 +30,17 @@ export function createDefaultAppSettings(debugLayout = false): AppSettings {
 
 export function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): AppSettings {
   const defaults = createDefaultAppSettings();
+  const stored = value as
+    | (Partial<AppSettings> & { codeEditorThemeId?: unknown })
+    | null
+    | undefined;
   return {
     debugLayout: typeof value?.debugLayout === "boolean" ? value.debugLayout : defaults.debugLayout,
     terminalFontSize:
       typeof value?.terminalFontSize === "number" && Number.isFinite(value.terminalFontSize)
         ? Math.min(terminalFontSizeMax, Math.max(terminalFontSizeMin, value.terminalFontSize))
         : defaults.terminalFontSize,
+    themeId: normalizeThemeId(stored?.themeId ?? stored?.codeEditorThemeId),
     tileHeadersVisible:
       typeof value?.tileHeadersVisible === "boolean"
         ? value.tileHeadersVisible
