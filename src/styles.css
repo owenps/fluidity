@@ -1137,6 +1137,14 @@ body {
   background: transparent;
 }
 
+.project-file-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  filter: grayscale(1) saturate(0);
+  opacity: 0.9;
+}
+
 .picker-option-copy {
   display: grid;
   min-width: 0;

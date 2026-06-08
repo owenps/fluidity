@@ -17,6 +17,7 @@ import {
   type ThemeId,
 } from "./themeRegistry";
 import { commandIdForKeyboardEvent, createCommands, type AppCommandApi } from "./commands";
+import { fileIconForPath } from "./fileIcons";
 import { KeyCap } from "./KeyCap";
 import { Picker, PickerShortcutHint, PickerShortcutSeparator, type PickerItem } from "./Picker";
 import { APP_NAME } from "./appConstants";
@@ -730,7 +731,7 @@ export function App() {
           index.files.map((file) => ({
             id: file.path,
             title: file.path,
-            icon: "ƒ",
+            icon: fileIconForPath(file.path),
             searchText: file.path,
           })),
         );
