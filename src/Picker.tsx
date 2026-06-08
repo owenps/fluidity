@@ -6,6 +6,7 @@ export interface PickerItem {
   title: string;
   icon: ReactNode;
   detail?: ReactNode;
+  searchText?: string;
   disabled?: boolean;
 }
 
@@ -16,18 +17,44 @@ export interface PickerSelectOptions {
 interface PickerProps {
   title: string;
   items: PickerItem[];
+  maxVisibleItems?: number;
   footer?: ReactNode | null;
   onSelect: (item: PickerItem, options: PickerSelectOptions) => void;
   onClose: () => void;
 }
 
-export function Picker({ title, items, footer, onSelect, onClose }: PickerProps) {
+function pickerItemScore(item: PickerItem, query: string): number | null {
+  const haystack = `${item.title} ${item.searchText ?? ""}`.toLowerCase();
+  const title = item.title.toLowerCase();
+  if (title.startsWith(query)) return 0;
+  const titleIndex = title.indexOf(query);
+  if (titleIndex >= 0) return 10 + titleIndex;
+  const haystackIndex = haystack.indexOf(query);
+  if (haystackIndex >= 0) return 100 + haystackIndex;
+
+  let score = 200;
+  let cursor = 0;
+  for (const character of query) {
+    const next = haystack.indexOf(character, cursor);
+    if (next === -1) return null;
+    score += next - cursor;
+    cursor = next + 1;
+  }
+  return score;
+}
+
+export function Picker({ title, items, maxVisibleItems, footer, onSelect, onClose }: PickerProps) {
   const [query, setQuery] = useState("");
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return items;
-    return items.filter((item) => item.title.toLowerCase().includes(normalizedQuery));
-  }, [items, query]);
+    if (!normalizedQuery) return maxVisibleItems ? items.slice(0, maxVisibleItems) : items;
+    const matches = items
+      .map((item) => ({ item, score: pickerItemScore(item, normalizedQuery) }))
+      .filter((result): result is { item: PickerItem; score: number } => result.score !== null)
+      .sort((left, right) => left.score - right.score)
+      .map((result) => result.item);
+    return maxVisibleItems ? matches.slice(0, maxVisibleItems) : matches;
+  }, [items, maxVisibleItems, query]);
   const enabledItems = useMemo(() => visibleItems.filter((item) => !item.disabled), [visibleItems]);
   const [activeItemId, setActiveItemId] = useState<string | null>(enabledItems[0]?.id ?? null);
   const rootRef = useRef<HTMLElement | null>(null);
@@ -72,12 +99,12 @@ export function Picker({ title, items, footer, onSelect, onClose }: PickerProps)
             onClose();
             return;
           }
-          if (event.key === "ArrowDown") {
+          if (event.key === "ArrowDown" || (event.ctrlKey && event.key === "n")) {
             event.preventDefault();
             moveActiveItem(1);
             return;
           }
-          if (event.key === "ArrowUp") {
+          if (event.key === "ArrowUp" || (event.ctrlKey && event.key === "p")) {
             event.preventDefault();
             moveActiveItem(-1);
             return;

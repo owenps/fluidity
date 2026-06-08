@@ -4,7 +4,7 @@ import "monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import "monaco-editor/min/vs/editor/editor.main.css";
 import { VimMode, initVimMode, type VimAdapterInstance } from "monaco-vim";
-import { writeCodeFile } from "./codeFileClient";
+import { readCodeFile, writeCodeFile } from "./codeFileClient";
 
 globalThis.MonacoEnvironment = {
   getWorker() {
@@ -40,6 +40,11 @@ interface OpenFileState {
   version: string;
 }
 
+export interface CodeEditorOpenFileRequest {
+  path: string;
+  token: number;
+}
+
 function registerVimWriteCommand() {
   if (vimWriteCommandRegistered) return;
   const vimApi = (
@@ -53,13 +58,22 @@ function registerVimWriteCommand() {
   vimWriteCommandRegistered = true;
 }
 
-export function CodeEditorTile({ active, workspaceId }: { active: boolean; workspaceId: string }) {
+export function CodeEditorTile({
+  active,
+  workspaceId,
+  openFileRequest,
+}: {
+  active: boolean;
+  workspaceId: string;
+  openFileRequest?: CodeEditorOpenFileRequest;
+}) {
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const statusRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const activeRef = useRef(active);
   const openFileRef = useRef<OpenFileState | null>(null);
   const ignoreContentChangeRef = useRef(false);
+  const handledOpenFileRequestTokenRef = useRef<number | null>(null);
   const [openFile, setOpenFile] = useState<OpenFileState | null>(null);
   const [dirty, setDirty] = useState(false);
   const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
@@ -171,6 +185,36 @@ export function CodeEditorTile({ active, workspaceId }: { active: boolean; works
   useEffect(() => {
     if (active) editorRef.current?.focus();
   }, [active]);
+
+  useEffect(() => {
+    if (!openFileRequest || !workspaceId) return;
+    if (handledOpenFileRequestTokenRef.current === openFileRequest.token) return;
+    if (dirty && !window.confirm("Discard unsaved editor changes and open another file?")) return;
+    handledOpenFileRequestTokenRef.current = openFileRequest.token;
+
+    let cancelled = false;
+    const openFile = async () => {
+      try {
+        const response = await readCodeFile({ workspaceId, path: openFileRequest.path });
+        if (cancelled) return;
+        const editor = editorRef.current;
+        if (!editor) return;
+        ignoreContentChangeRef.current = true;
+        editor.setValue(response.contents);
+        ignoreContentChangeRef.current = false;
+        setCurrentOpenFile(response);
+        setDirty(false);
+        editor.focus();
+      } catch (error) {
+        if (!cancelled) window.alert(`Open failed: ${String(error)}`);
+      }
+    };
+
+    void openFile();
+    return () => {
+      cancelled = true;
+    };
+  }, [dirty, openFileRequest, workspaceId]);
 
   return (
     <div className="code-editor-tile">

@@ -59,6 +59,7 @@ const GRID_MIN_TILE_WIDTH: i32 = 1;
 const GRID_MIN_TILE_HEIGHT: i32 = 1;
 const DEFAULT_WORKSPACE_TILE_WIDTH: i32 = 3;
 const CODE_FILE_SIZE_LIMIT_BYTES: u64 = 2 * 1024 * 1024;
+const PROJECT_FILE_INDEX_LIMIT: usize = 20_000;
 
 struct WorkspaceState {
     state_path: PathBuf,
@@ -148,6 +149,8 @@ struct ProjectSettings {
     delete_workspace_branch_on_discard: bool,
     #[serde(default)]
     workspace_copy_files: Vec<String>,
+    #[serde(default)]
+    project_search_exclude_paths: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -249,6 +252,26 @@ struct CodeFileWriteRequest {
 struct CodeFileWriteResponse {
     path: String,
     version: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectFileIndexRequest {
+    workspace_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectFileIndexEntry {
+    path: String,
+    touched_at: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectFileIndexResponse {
+    files: Vec<ProjectFileIndexEntry>,
+    indexed_at: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -867,6 +890,56 @@ fn code_file_write(
 }
 
 #[tauri::command]
+fn project_file_index(
+    state: State<'_, WorkspaceState>,
+    request: ProjectFileIndexRequest,
+) -> Result<ProjectFileIndexResponse, String> {
+    let (workspace_root, project_settings) = {
+        let app_state = state.app_state.lock().map_err(lock_error)?;
+        let workspace = app_state
+            .open_workspaces
+            .iter()
+            .find(|workspace| workspace.id == request.workspace_id)
+            .ok_or_else(|| "workspace is not open".to_string())?;
+        let project = app_state
+            .projects
+            .iter()
+            .find(|project| project.id == workspace.project_id)
+            .ok_or_else(|| "project not found".to_string())?;
+        (workspace.root.clone(), project.settings.clone())
+    };
+
+    let workspace_root = PathBuf::from(workspace_root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let exclude_paths = project_file_index_exclude_paths(&project_settings);
+    let mut paths = git_project_file_paths(&workspace_root)
+        .unwrap_or_else(|| filesystem_project_file_paths(&workspace_root));
+    paths.retain(|path| !project_file_path_is_excluded(path, &exclude_paths));
+    paths.sort();
+    paths.dedup();
+
+    let mut files: Vec<ProjectFileIndexEntry> = paths
+        .into_iter()
+        .map(|path| project_file_index_entry(&workspace_root, path))
+        .collect();
+    files.sort_by(|left, right| {
+        right
+            .touched_at
+            .cmp(&left.touched_at)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    if files.len() > PROJECT_FILE_INDEX_LIMIT {
+        files.truncate(PROJECT_FILE_INDEX_LIMIT);
+    }
+
+    Ok(ProjectFileIndexResponse {
+        files,
+        indexed_at: now_unix_seconds(),
+    })
+}
+
+#[tauri::command]
 fn application_reset(
     workspace_state: State<'_, WorkspaceState>,
     terminal_state: State<'_, TerminalState>,
@@ -1019,6 +1092,7 @@ pub fn run() {
             workspace_tile_state_save,
             code_file_read,
             code_file_write,
+            project_file_index,
             application_reset,
             terminal_create,
             terminal_write,
@@ -2639,6 +2713,135 @@ fn workspace_file_path(
     }
 
     Ok(canonical_candidate)
+}
+
+fn project_file_index_exclude_paths(project_settings: &ProjectSettings) -> Vec<String> {
+    let mut excludes = vec![
+        ".git".to_string(),
+        "node_modules".to_string(),
+        "target".to_string(),
+        "dist".to_string(),
+        "build".to_string(),
+        ".next".to_string(),
+        ".nuxt".to_string(),
+        "coverage".to_string(),
+        ".cache".to_string(),
+        ".turbo".to_string(),
+    ];
+    excludes.extend(
+        project_settings
+            .project_search_exclude_paths
+            .iter()
+            .filter_map(|path| normalize_project_index_path(path)),
+    );
+    excludes.sort();
+    excludes.dedup();
+    excludes
+}
+
+fn project_file_index_entry(workspace_root: &Path, path: String) -> ProjectFileIndexEntry {
+    let touched_at = fs::metadata(workspace_root.join(&path))
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+
+    ProjectFileIndexEntry { path, touched_at }
+}
+
+fn git_project_file_paths(workspace_root: &Path) -> Option<Vec<String>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(workspace_root)
+        .args(["ls-files", "-co", "--exclude-standard"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(normalize_project_index_path)
+            .collect(),
+    )
+}
+
+fn filesystem_project_file_paths(workspace_root: &Path) -> Vec<String> {
+    let mut paths = Vec::new();
+    collect_filesystem_project_file_paths(workspace_root, workspace_root, &mut paths);
+    paths
+}
+
+fn collect_filesystem_project_file_paths(root: &Path, directory: &Path, paths: &mut Vec<String>) {
+    if paths.len() >= PROJECT_FILE_INDEX_LIMIT {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if paths.len() >= PROJECT_FILE_INDEX_LIMIT {
+            return;
+        }
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+            if default_project_file_index_excluded_dir(&file_name) {
+                continue;
+            }
+            collect_filesystem_project_file_paths(root, &path, paths);
+            continue;
+        }
+        if !entry.file_type().is_ok_and(|file_type| file_type.is_file()) {
+            continue;
+        }
+        if let Ok(relative_path) = path.strip_prefix(root) {
+            if let Some(relative_path) =
+                normalize_project_index_path(&path_to_string(relative_path))
+            {
+                paths.push(relative_path);
+            }
+        }
+    }
+}
+
+fn default_project_file_index_excluded_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".nuxt"
+            | "coverage"
+            | ".cache"
+            | ".turbo"
+    )
+}
+
+fn normalize_project_index_path(path: &str) -> Option<String> {
+    let normalized = path.trim().replace('\\', "/");
+    let normalized = normalized
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .to_string();
+    if normalized.is_empty() || normalized.contains('\0') || normalized.contains("../") {
+        return None;
+    }
+    Some(normalized)
+}
+
+fn project_file_path_is_excluded(path: &str, excludes: &[String]) -> bool {
+    excludes
+        .iter()
+        .any(|exclude| path == exclude || path.starts_with(&format!("{exclude}/")))
 }
 
 fn file_version(metadata: &fs::Metadata) -> Result<String, String> {

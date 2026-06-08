@@ -25,7 +25,7 @@ const terminalFontSizeStep = 1;
 
 type SettingsScope = "global" | "project";
 type SettingsCategoryId = "general" | "appearance" | "tiles" | "extensions" | "keybinds";
-type ProjectSettingsCategoryId = "overview" | "workspaces" | "danger";
+type ProjectSettingsCategoryId = "overview" | "workspaces" | "search" | "danger";
 type FocusPane = "left" | "right";
 
 const settingsCategories: { id: SettingsCategoryId; title: string }[] = [
@@ -39,6 +39,7 @@ const settingsCategories: { id: SettingsCategoryId; title: string }[] = [
 const projectSettingsCategories: { id: ProjectSettingsCategoryId; title: string }[] = [
   { id: "overview", title: "Overview" },
   { id: "workspaces", title: "Workspaces" },
+  { id: "search", title: "Search" },
   { id: "danger", title: "Danger Zone" },
 ];
 
@@ -128,6 +129,7 @@ function controlIdsForSelection(
       ? ["workspace-copy-files", "delete-workspace-branch-on-discard"]
       : [];
   }
+  if (projectCategory === "search") return ["project-search-excludes"];
   if (projectCategory === "danger") return ["disconnect-project"];
   return [];
 }
@@ -163,6 +165,7 @@ export function SettingsView({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const projectPickerRef = useRef<HTMLSelectElement | null>(null);
   const workspaceCopyFilesRef = useRef<HTMLTextAreaElement | null>(null);
+  const projectSearchExcludesRef = useRef<HTMLTextAreaElement | null>(null);
   const [focusPane, setFocusPane] = useState<FocusPane>("left");
   const [settingsScope, setSettingsScope] = useState<SettingsScope>(lastSettingsScope);
   const [selectedGlobalCategory, setSelectedGlobalCategory] =
@@ -311,6 +314,14 @@ export function SettingsView({
     });
   };
 
+  const updateProjectSearchExcludePaths = (value: string) => {
+    if (!selectedProject) return;
+    onProjectSettingsChange(selectedProject.id, {
+      ...selectedProject.settings,
+      projectSearchExcludePaths: value.length === 0 ? [] : value.split(/\r?\n/),
+    });
+  };
+
   const confirmResetApplication = () => {
     if (!pendingReset) {
       setPendingReset(true);
@@ -372,6 +383,10 @@ export function SettingsView({
     }
     if (activeControlId === "workspace-copy-files") {
       workspaceCopyFilesRef.current?.focus();
+      return;
+    }
+    if (activeControlId === "project-search-excludes") {
+      projectSearchExcludesRef.current?.focus();
       return;
     }
     if (activeControlId === "delete-workspace-branch-on-discard") {
@@ -1011,6 +1026,7 @@ export function SettingsView({
 
     if (selectedProjectCategory === "overview") return renderProjectOverviewDetail();
     if (selectedProjectCategory === "workspaces") return renderProjectWorkspacesDetail();
+    if (selectedProjectCategory === "search") return renderProjectSearchDetail();
     return renderProjectDangerDetail();
   }
 
@@ -1073,6 +1089,12 @@ export function SettingsView({
     );
   }
 
+  function renderProjectSearchDetail() {
+    if (!selectedProject) return null;
+
+    return <div className="settings-detail-body">{renderProjectSearchExcludesControl()}</div>;
+  }
+
   function renderProjectDangerDetail() {
     if (!selectedProject) return null;
 
@@ -1126,6 +1148,39 @@ export function SettingsView({
           spellCheck={false}
           onFocus={() => setActiveControlId("workspace-copy-files")}
           onChange={(event) => updateProjectWorkspaceCopyFiles(event.target.value)}
+        />
+      </label>
+    );
+  }
+
+  function renderProjectSearchExcludesControl() {
+    if (!selectedProject) return null;
+    const active = activeControlId === "project-search-excludes" && focusPane === "right";
+
+    return (
+      <label
+        className={[
+          "settings-row",
+          "settings-textarea-row",
+          active ? "settings-row-active" : "",
+        ].join(" ")}
+        onClick={() => setActiveControlId("project-search-excludes")}
+      >
+        <span className="settings-row-copy">
+          <span className="settings-row-title">Paths excluded from project search</span>
+          <span className="settings-row-description">
+            One Project-root-relative path per line. Directories exclude their descendants.
+          </span>
+        </span>
+        <textarea
+          ref={projectSearchExcludesRef}
+          className="settings-textarea-control"
+          value={(selectedProject.settings.projectSearchExcludePaths ?? []).join("\n")}
+          placeholder={"node_modules\ndist\n.env"}
+          rows={5}
+          spellCheck={false}
+          onFocus={() => setActiveControlId("project-search-excludes")}
+          onChange={(event) => updateProjectSearchExcludePaths(event.target.value)}
         />
       </label>
     );

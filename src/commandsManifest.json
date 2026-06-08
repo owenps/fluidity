@@ -47,6 +47,17 @@
     "nativeAccelerator": "Cmd+Shift+Backspace"
   },
   {
+    "id": "projectSearch.open",
+    "title": "Search Project Files",
+    "shortcutGroup": "General",
+    "shortcut": {
+      "key": "p",
+      "meta": true,
+      "displayKeys": ["⌘", "P"]
+    },
+    "nativeAccelerator": "Cmd+P"
+  },
+  {
     "id": "tilePicker.open",
     "title": "Create New Tile",
     "shortcutGroup": "General",

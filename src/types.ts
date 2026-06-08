@@ -54,6 +54,7 @@ export type ProjectKind = "git" | "plain";
 export interface ProjectSettings {
   deleteWorkspaceBranchOnDiscard: boolean;
   workspaceCopyFiles: string[];
+  projectSearchExcludePaths: string[];
 }
 
 export interface RegisteredProject {
@@ -207,6 +208,20 @@ export interface CodeFileWriteRequest {
 export interface CodeFileWriteResponse {
   path: string;
   version: string;
+}
+
+export interface ProjectFileIndexRequest {
+  workspaceId: string;
+}
+
+export interface ProjectFileIndexEntry {
+  path: string;
+  touchedAt: number;
+}
+
+export interface ProjectFileIndexResponse {
+  files: ProjectFileIndexEntry[];
+  indexedAt: number;
 }
 
 export type TerminalLaunch =

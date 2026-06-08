@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { CodeEditorTile } from "./CodeEditorTile";
+import { CodeEditorTile, type CodeEditorOpenFileRequest } from "./CodeEditorTile";
 import { commandIdForKeyboardEvent, createCommands, type AppCommandApi } from "./commands";
 import { KeyCap } from "./KeyCap";
 import { Picker, type PickerItem } from "./Picker";
@@ -13,6 +13,7 @@ import {
   listToolAvailabilities,
 } from "./integrationClient";
 import { addProject, listProjects, removeProject } from "./projectClient";
+import { indexProjectFiles } from "./projectFileClient";
 import { createDefaultAppSettings, type AppSettings } from "./settings";
 import { getAppSettings, updateAppSettings, updateProjectSettings } from "./settingsClient";
 import { TerminalTile } from "./TerminalTile";
@@ -169,6 +170,12 @@ export function App() {
   const [currentWorkspaceDiscardable, setCurrentWorkspaceDiscardable] = useState(false);
   const [tilePickerOpen, setTilePickerOpen] = useState(false);
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
+  const [projectSearchOpen, setProjectSearchOpen] = useState(false);
+  const [projectFileItems, setProjectFileItems] = useState<PickerItem[]>([]);
+  const [projectFileIndexLoading, setProjectFileIndexLoading] = useState(false);
+  const [codeEditorOpenFileRequests, setCodeEditorOpenFileRequests] = useState<
+    Record<string, CodeEditorOpenFileRequest>
+  >({});
   const [settingsViewOpen, setSettingsViewOpen] = useState(false);
   const [settingsViewFocusToken, setSettingsViewFocusToken] = useState(0);
   const [settingsViewInitialCategory, setSettingsViewInitialCategory] = useState<
@@ -198,12 +205,31 @@ export function App() {
     tilePickerVisibility,
   } = settings;
   const layoutRef = useRef(layout);
+  const lastFocusedCodeTileIdRef = useRef<string | null>(null);
   const previousTileRuntimeOwnersRef = useRef<{ workspaceId: string | null; tileIds: Set<string> }>(
     { workspaceId: null, tileIds: new Set() },
   );
 
   useEffect(() => {
     layoutRef.current = layout;
+    const focusedTile = layout.tiles.find((tile) => tile.id === layout.focusedTileId);
+    if (focusedTile?.kind === "code") lastFocusedCodeTileIdRef.current = focusedTile.id;
+    if (
+      lastFocusedCodeTileIdRef.current &&
+      !layout.tiles.some(
+        (tile) => tile.id === lastFocusedCodeTileIdRef.current && tile.kind === "code",
+      )
+    ) {
+      lastFocusedCodeTileIdRef.current = null;
+    }
+    setCodeEditorOpenFileRequests((previous) => {
+      const codeTileIds = new Set(
+        layout.tiles.filter((tile) => tile.kind === "code").map((tile) => tile.id),
+      );
+      const nextEntries = Object.entries(previous).filter(([tileId]) => codeTileIds.has(tileId));
+      if (nextEntries.length === Object.keys(previous).length) return previous;
+      return Object.fromEntries(nextEntries);
+    });
   }, [layout]);
 
   useEffect(() => {
@@ -535,6 +561,7 @@ export function App() {
     setProjectsLoaded(true);
     setTilePickerOpen(false);
     setWorkspacePickerOpen(false);
+    setProjectSearchOpen(false);
     setSettingsViewOpen(false);
     setSettingsViewInitialCategory(null);
   }, []);
@@ -639,12 +666,54 @@ export function App() {
     runDiscardWorkspace(currentWorkspaceId);
   }, [currentWorkspaceDiscardable, currentWorkspaceId, runDiscardWorkspace]);
 
+  const loadProjectFileIndex = useCallback(() => {
+    if (!currentWorkspaceId) {
+      setProjectFileItems([]);
+      return;
+    }
+
+    setProjectFileIndexLoading(true);
+    void indexProjectFiles({ workspaceId: currentWorkspaceId })
+      .then((index) => {
+        setProjectFileItems(
+          index.files.map((file) => ({
+            id: file.path,
+            title: file.path,
+            icon: "ƒ",
+            searchText: file.path,
+          })),
+        );
+      })
+      .catch((error) => {
+        setProjectFileItems([]);
+        addToast({
+          severity: "error",
+          title: "Could not index project files",
+          detail: String(error),
+        });
+      })
+      .finally(() => setProjectFileIndexLoading(false));
+  }, [addToast, currentWorkspaceId]);
+
+  const openProjectSearch = useCallback(() => {
+    if (!currentWorkspaceId) {
+      addToast({ severity: "info", title: "Open a workspace before searching files" });
+      return;
+    }
+    setProjectSearchOpen(true);
+    setTilePickerOpen(false);
+    setWorkspacePickerOpen(false);
+    setSettingsViewOpen(false);
+    loadProjectFileIndex();
+  }, [addToast, currentWorkspaceId, loadProjectFileIndex]);
+
   const openSettingsView = useCallback((category?: "extensions") => {
     setSettingsViewInitialCategory(category ?? null);
     setSettingsViewOpen(true);
     setSettingsViewFocusToken((token) => token + 1);
     setTilePickerOpen(false);
     setWorkspacePickerOpen(false);
+    setProjectSearchOpen(false);
   }, []);
 
   const reloadExtensions = useCallback(() => {
@@ -674,12 +743,19 @@ export function App() {
       },
       openTilePicker: () => setTilePickerOpen(true),
       openWorkspacePicker: () => setWorkspacePickerOpen(true),
+      openProjectSearch,
       openSettings: openSettingsView,
       reloadExtensions,
       addProject: runAddProject,
       discardWorkspace: runDiscardCurrentWorkspace,
     }),
-    [openSettingsView, reloadExtensions, runAddProject, runDiscardCurrentWorkspace],
+    [
+      openProjectSearch,
+      openSettingsView,
+      reloadExtensions,
+      runAddProject,
+      runDiscardCurrentWorkspace,
+    ],
   );
 
   useEffect(() => {
@@ -748,6 +824,7 @@ export function App() {
         layoutRef.current.focusModeTileId &&
         !tilePickerOpen &&
         !workspacePickerOpen &&
+        !projectSearchOpen &&
         !settingsViewOpen
       ) {
         event.preventDefault();
@@ -762,6 +839,7 @@ export function App() {
       event.preventDefault();
       event.stopPropagation();
 
+      if (tilePickerOpen || workspacePickerOpen || projectSearchOpen) return;
       if (settingsViewOpen && commandId !== "settings.open") return;
 
       const command = commandById.get(commandId);
@@ -771,7 +849,14 @@ export function App() {
 
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [commandApi, commandById, settingsViewOpen, tilePickerOpen, workspacePickerOpen]);
+  }, [
+    commandApi,
+    commandById,
+    projectSearchOpen,
+    settingsViewOpen,
+    tilePickerOpen,
+    workspacePickerOpen,
+  ]);
 
   const workspaceRoot = context?.workspace.root;
   const showGitBranch = Boolean(context?.gitBranch && context.gitBranch !== context.workspace.name);
@@ -846,6 +931,48 @@ export function App() {
       focusedTileId: result.focusedTileId,
     }));
     setTilePickerOpen(false);
+  };
+
+  const codeTileTarget = () => {
+    const { tiles, focusedTileId } = layoutRef.current;
+    const focusedTile = tiles.find((tile) => tile.id === focusedTileId);
+    if (focusedTile?.kind === "code") return focusedTile.id;
+    const lastFocusedCodeTileId = lastFocusedCodeTileIdRef.current;
+    if (lastFocusedCodeTileId) {
+      const lastFocusedCodeTile = tiles.find((tile) => tile.id === lastFocusedCodeTileId);
+      if (lastFocusedCodeTile?.kind === "code") return lastFocusedCodeTile.id;
+    }
+    return tiles.find((tile) => tile.kind === "code")?.id ?? null;
+  };
+
+  const openProjectFile = (path: string) => {
+    setProjectSearchOpen(false);
+    const existingCodeTileId = codeTileTarget();
+    const request = { path, token: Date.now() };
+
+    if (existingCodeTileId) {
+      setCodeEditorOpenFileRequests((previous) => ({ ...previous, [existingCodeTileId]: request }));
+      setLayout((previous) => ({ ...previous, focusedTileId: existingCodeTileId }));
+      lastFocusedCodeTileIdRef.current = existingCodeTileId;
+      return;
+    }
+
+    const previousTileIds = new Set(layoutRef.current.tiles.map((tile) => tile.id));
+    const result = splitFocusedTile(layoutRef.current.tiles, layoutRef.current.focusedTileId, {
+      kind: "code",
+      title: "Code Editor",
+    });
+    const newCodeTile = result.tiles.find(
+      (tile) => !previousTileIds.has(tile.id) && tile.kind === "code",
+    );
+    if (!newCodeTile) {
+      addToast({ severity: "error", title: "Could not create a code editor tile" });
+      return;
+    }
+
+    setCodeEditorOpenFileRequests((previous) => ({ ...previous, [newCodeTile.id]: request }));
+    setLayout((previous) => ({ ...previous, tiles: result.tiles, focusedTileId: newCodeTile.id }));
+    lastFocusedCodeTileIdRef.current = newCodeTile.id;
   };
 
   const assignTileResume = useCallback((tileId: string, resume: TileResumeMetadata) => {
@@ -1020,7 +1147,11 @@ export function App() {
                         onDiscardWorkspace={runDiscardWorkspace}
                       />
                     ) : tile.kind === "code" ? (
-                      <CodeEditorTile active={focused} workspaceId={currentWorkspaceId ?? ""} />
+                      <CodeEditorTile
+                        active={focused}
+                        workspaceId={currentWorkspaceId ?? ""}
+                        openFileRequest={codeEditorOpenFileRequests[tile.id]}
+                      />
                     ) : tile.kind === "tool" && !integrationCatalogLoaded ? (
                       <div className="tile-placeholder">Loading Integration Tile…</div>
                     ) : tile.kind === "tool" &&
@@ -1100,6 +1231,17 @@ export function App() {
             }
             runCreateWorkspace(item.id);
           }}
+        />
+      ) : null}
+
+      {projectSearchOpen ? (
+        <Picker
+          title="Search Project Files"
+          items={projectFileItems}
+          maxVisibleItems={10}
+          footer={projectFileIndexLoading ? "Indexing files…" : null}
+          onClose={() => setProjectSearchOpen(false)}
+          onSelect={(item: PickerItem) => openProjectFile(item.id)}
         />
       ) : null}
 

@@ -1031,7 +1031,7 @@ body {
   background: transparent;
   color: var(--foreground);
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   outline: none;
 }
 
@@ -1045,11 +1045,11 @@ body {
 
 .picker-option {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: 26px minmax(0, 1fr);
   align-items: center;
   width: 100%;
-  gap: 0.65rem;
-  padding: 0.75rem;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
   border: 0;
   border-radius: 0;
   background: var(--popover);
@@ -1079,10 +1079,10 @@ body {
 .picker-option-icon {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   color: var(--foreground);
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -1114,7 +1114,7 @@ body {
   min-width: 0;
   overflow: hidden;
   color: var(--foreground);
-  font-size: 14px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1123,7 +1123,7 @@ body {
   min-width: 0;
   overflow: hidden;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
