@@ -20,6 +20,7 @@ Fluidity's extensibility direction is to make the application a customizable pla
 - Persisted Integration Tiles resolve by `extensionId + integrationId + integrationTileId`, not by Integration identity alone.
 - v1 Extensions use an **Extension Definition** stored in `fluidity.extension.json` with a `schemaVersion` field; the v1 schema is documented in [Extension Definitions](extension-definitions.md).
 - `fluidity.extension.json` is a forward-compatible declaration layer, not a permanent rejection of executable Extension modules; the future executable path is researched in [Executable Extension Modules Research](executable-extension-modules.md).
+- Future **Active Extension Points** such as contributed Command handlers, schedules, Workspace lifecycle contributions, Workspace Composition actions, file actions, and alternate input providers should keep `fluidity.extension.json` as their declaration and permission surface; see [Active Extension Points](active-extension-points.md).
 - Fluidity should support both **Global Extensions** and **Project Extensions**.
 - Global Extensions live under Fluidity's app data directory at `extensions/<extension-id>/fluidity.extension.json` and are available across all Projects and Workspaces in this Fluidity app installation.
 - Project Extensions live under `.fluidity/extensions/<extension-id>/fluidity.extension.json` in the Project root and are available only for that Project's Workspaces.
@@ -35,6 +36,8 @@ Fluidity's extensibility direction is to make the application a customizable pla
 ## Executable Extension module direction
 
 Executable Extension modules remain future work. Fluidity should not directly copy Pi's arbitrary in-process TypeScript extension model; executable modules should keep `fluidity.extension.json` as the required declaration and permission surface, run outside Fluidity Core through a supervised host, and contribute through the same Workspace-scoped registry as manifest-only Extensions.
+
+Active Extension Points are also future work. Manifest-only Extension Definitions remain appropriate when Fluidity Core can fully validate and execute a contribution from data. Executable modules are required when Extensions provide custom runtime behavior, background automation, alternate input handling, or Workspace Composition logic.
 
 ## v1 research target
 

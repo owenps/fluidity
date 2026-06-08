@@ -55,3 +55,5 @@ cd src-tauri && cargo check && cargo fmt --check && cargo clippy -- -D warnings
 ```
 
 Requires Rust/Cargo and the Tauri system dependencies for macOS.
+
+See [Terminal Environment](docs/terminal-environment.md) for packaged macOS Terminal Tile and Tool Tile environment behavior.

@@ -1,5 +1,23 @@
+mod developer_environment;
+mod extension_catalog;
 mod terminal_session_runtime;
 
+use developer_environment::resolve_for_cwd;
+#[cfg(test)]
+use developer_environment::DeveloperEnvironment;
+use extension_catalog::{
+    ensure_tool_available, extension_catalog_for_workspace, is_valid_contribution_id,
+    is_valid_extension_id, legacy_tool_integration_tile, terminal_launch_plan_for_resolved_tool,
+    tool_integration_tile_for_launch, tool_integration_tile_for_tile, ExtensionSettingsResponse,
+    IntegrationCatalogResponse, ToolAvailabilityResponse,
+};
+#[cfg(test)]
+use extension_catalog::{
+    terminal_launch_plan, tool_availability_for_tile,
+    tool_integration_tile_for_launch_without_project_scope, ExtensionContributionProvenance,
+    ToolAvailabilityStatus, ToolIntegrationTile, ToolResumeStrategy, CORE_EXTENSION_ID,
+    EXTENSION_DEFINITION_FILE,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -33,9 +51,6 @@ const NEW_WORKSPACE_EVENT: &str = "app://new-workspace";
 const DISCARD_WORKSPACE_MENU_ID: &str = "workspace.discard";
 const DISCARD_WORKSPACE_EVENT: &str = "app://discard-workspace";
 const COMMANDS_MANIFEST_JSON: &str = include_str!("../../src/commandsManifest.json");
-const INTEGRATION_CATALOG_JSON: &str = include_str!("../../src/shared/integrationCatalog.json");
-const CORE_EXTENSION_ID: &str = "fluidity.core";
-const EXTENSION_DEFINITION_FILE: &str = "fluidity.extension.json";
 const APP_STATE_FILE: &str = "app-state.json";
 const APP_STATE_VERSION: u32 = 1;
 const GRID_COLUMNS: i32 = 12;
@@ -263,130 +278,6 @@ struct CommandManifestEntry {
     native_accelerator: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct IntegrationCatalog {
-    integrations: Vec<IntegrationCatalogIntegration>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct IntegrationCatalogIntegration {
-    id: String,
-    title: String,
-    tiles: Vec<IntegrationCatalogTile>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct IntegrationCatalogTile {
-    id: String,
-    title: String,
-    kind: String,
-    #[serde(default)]
-    default_visible: bool,
-    icon_key: Option<String>,
-    tool_command: Option<String>,
-    resume_provider: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct ToolIntegrationTile {
-    extension_id: String,
-    integration_id: String,
-    integration_tile_id: String,
-    title: String,
-    default_visible: bool,
-    icon: Option<ExtensionIcon>,
-    command_argv: Vec<String>,
-    resume: ToolResumeStrategy,
-    provenance: ExtensionContributionProvenance,
-}
-
-#[derive(Debug, Clone)]
-enum ToolResumeStrategy {
-    CoreProvider { provider: String },
-    None,
-    SessionIdArg { provider: String, arg: String },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExtensionDefinition {
-    schema_version: u32,
-    id: String,
-    title: String,
-    icon: Option<ExtensionIcon>,
-    contributes: ExtensionContributes,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ExtensionContributes {
-    integrations: Vec<ExtensionIntegrationContribution>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ExtensionIntegrationContribution {
-    id: String,
-    title: String,
-    icon: Option<ExtensionIcon>,
-    tiles: Vec<ExtensionIntegrationTileContribution>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExtensionIntegrationTileContribution {
-    id: String,
-    kind: String,
-    title: String,
-    #[serde(default)]
-    default_visible: bool,
-    icon: Option<ExtensionIcon>,
-    command: ExtensionCommand,
-    resume: Option<ExtensionResume>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum ExtensionIcon {
-    Key { key: String },
-    Path { path: String },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ExtensionCommand {
-    argv: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "strategy", rename_all = "kebab-case")]
-enum ExtensionResume {
-    None,
-    SessionIdArg { arg: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum ToolAvailabilityStatus {
-    Available,
-    Unavailable,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToolAvailabilityResponse {
-    extension_id: String,
-    integration_id: String,
-    integration_tile_id: String,
-    title: String,
-    command: String,
-    status: ToolAvailabilityStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    resolved_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
-    provenance: ExtensionContributionProvenance,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct IntegrationCatalogListRequest {
@@ -403,95 +294,6 @@ struct ToolAvailabilityListRequest {
 #[serde(rename_all = "camelCase")]
 struct ExtensionSettingsListRequest {
     workspace_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExtensionSettingsResponse {
-    extensions: Vec<ExtensionSettingsEntry>,
-    diagnostics: Vec<ExtensionDiagnostic>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExtensionSettingsEntry {
-    source_kind: String,
-    extension_id: String,
-    title: String,
-    status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    manifest_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_root: Option<String>,
-    diagnostics: Vec<ExtensionDiagnostic>,
-    tiles: Vec<ExtensionSettingsTile>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExtensionSettingsTile {
-    integration_id: String,
-    integration_tile_id: String,
-    title: String,
-    default_visible: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct IntegrationCatalogResponse {
-    tiles: Vec<IntegrationCatalogTileResponse>,
-    diagnostics: Vec<ExtensionDiagnostic>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct IntegrationCatalogTileResponse {
-    extension_id: String,
-    integration_id: String,
-    integration_tile_id: String,
-    title: String,
-    default_visible: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    icon: Option<ExtensionIconResponse>,
-    provenance: ExtensionContributionProvenance,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-enum ExtensionIconResponse {
-    Key { key: String, fallback_text: String },
-    Path { path: String, fallback_text: String },
-    Text { fallback_text: String },
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExtensionContributionProvenance {
-    source_kind: String,
-    extension_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    manifest_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_root: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExtensionDiagnostic {
-    severity: String,
-    message: String,
-    source_kind: String,
-    extension_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    manifest_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -855,75 +657,44 @@ fn project_remove(
     request: ProjectRemoveRequest,
 ) -> Result<ProjectRemoveResponse, String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
-    let Some(project_index) = app_state
-        .projects
-        .iter()
-        .position(|project| project.id == request.project_id)
-    else {
-        return Err("project not found".to_string());
-    };
-
-    let project = app_state.projects[project_index].clone();
-    let workspace_ids = app_state
-        .open_workspaces
-        .iter()
-        .filter(|workspace| workspace.project_id == project.id)
-        .map(|workspace| workspace.id.clone())
-        .collect::<Vec<_>>();
-    let workspaces = workspaces_by_ids(&app_state, &workspace_ids);
-    let cleanup_workspaces =
-        cleanup_targets_for_managed_workspaces(&state.app_data_dir, &workspaces);
-
-    if let Some(dirty_confirmation) = dirty_confirmation_for_workspaces(&cleanup_workspaces)? {
-        if !request.confirm_dirty {
-            return Ok(ProjectRemoveResponse {
-                current: workspace_overview_for_state(&app_state).current,
-                overview: workspace_overview_for_state(&app_state),
-                project,
-                removed_workspace_count: 0,
-                dirty_confirmation: Some(dirty_confirmation),
-                warnings: Vec::new(),
-            });
-        }
-    }
-
-    close_terminal_workspaces(&terminal_state, &workspaces)?;
-
-    if let Some(dirty_confirmation) = dirty_confirmation_for_workspaces(&cleanup_workspaces)? {
-        if !request.confirm_dirty {
-            return Ok(ProjectRemoveResponse {
-                current: workspace_overview_for_state(&app_state).current,
-                overview: workspace_overview_for_state(&app_state),
-                project,
-                removed_workspace_count: 0,
-                dirty_confirmation: Some(dirty_confirmation),
-                warnings: Vec::new(),
-            });
-        }
-    }
-
-    let mut warnings = Vec::new();
-    remove_workspace_roots(
+    match workspace_removal::project_disconnect(
+        &mut app_state,
         &state.app_data_dir,
-        &cleanup_workspaces,
+        &terminal_state,
+        &request.project_id,
         request.confirm_dirty,
-        &mut warnings,
-    )?;
-
-    let project = app_state.projects.remove(project_index);
-    let removed_workspace_count = remove_workspaces_from_state(&mut app_state, &workspace_ids);
-    normalize_workspace_stack(&mut app_state);
-    state.save(&app_state)?;
-    let overview = workspace_overview_for_state(&app_state);
-
-    Ok(ProjectRemoveResponse {
-        current: overview.current.clone(),
-        overview,
-        project,
-        removed_workspace_count,
-        dirty_confirmation: None,
-        warnings,
-    })
+    )? {
+        workspace_removal::ProjectDisconnectResult::Dirty {
+            project,
+            dirty_confirmation,
+        } => {
+            let overview = workspace_overview_for_state(&app_state);
+            Ok(ProjectRemoveResponse {
+                current: overview.current.clone(),
+                overview,
+                project,
+                removed_workspace_count: 0,
+                dirty_confirmation: Some(dirty_confirmation),
+                warnings: Vec::new(),
+            })
+        }
+        workspace_removal::ProjectDisconnectResult::Disconnected {
+            project,
+            removed_workspace_count,
+            warnings,
+        } => {
+            state.save(&app_state)?;
+            let overview = workspace_overview_for_state(&app_state);
+            Ok(ProjectRemoveResponse {
+                current: overview.current.clone(),
+                overview,
+                project,
+                removed_workspace_count,
+                dirty_confirmation: None,
+                warnings,
+            })
+        }
+    }
 }
 
 #[tauri::command]
@@ -933,56 +704,29 @@ fn workspace_discard(
     request: WorkspaceDiscardRequest,
 ) -> Result<WorkspaceDiscardResponse, String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
-    let mut target = workspace_cleanup_target(&app_state, &request.workspace_id)?;
-    target.workspace.git_branch = observed_git_branch(target.project.kind, &target.workspace.root)
-        .or(target.workspace.git_branch.clone());
-    if !workspace_discardable(&state.app_data_dir, &target.project, &target.workspace) {
-        return Err("workspace is not discardable".to_string());
-    }
-
-    if let Some(dirty_confirmation) =
-        dirty_confirmation_for_workspaces(std::slice::from_ref(&target))?
-    {
-        if !request.confirm_dirty {
-            return Ok(WorkspaceDiscardResponse {
-                overview: workspace_overview_for_state(&app_state),
-                dirty_confirmation: Some(dirty_confirmation),
-                warnings: Vec::new(),
-            });
-        }
-    }
-
-    close_terminal_workspaces(&terminal_state, std::slice::from_ref(&target))?;
-
-    if let Some(dirty_confirmation) =
-        dirty_confirmation_for_workspaces(std::slice::from_ref(&target))?
-    {
-        if !request.confirm_dirty {
-            return Ok(WorkspaceDiscardResponse {
-                overview: workspace_overview_for_state(&app_state),
-                dirty_confirmation: Some(dirty_confirmation),
-                warnings: Vec::new(),
-            });
-        }
-    }
-
-    let mut warnings = Vec::new();
-    remove_workspace_roots(
+    match workspace_removal::workspace_discard(
+        &mut app_state,
         &state.app_data_dir,
-        std::slice::from_ref(&target),
+        &terminal_state,
+        &request.workspace_id,
         request.confirm_dirty,
-        &mut warnings,
-    )?;
-    delete_workspace_branch_after_discard(&target, &mut warnings);
-    remove_workspaces_from_state(&mut app_state, &[request.workspace_id]);
-    normalize_workspace_stack(&mut app_state);
-    state.save(&app_state)?;
-
-    Ok(WorkspaceDiscardResponse {
-        overview: workspace_overview_for_state(&app_state),
-        dirty_confirmation: None,
-        warnings,
-    })
+    )? {
+        workspace_removal::WorkspaceDiscardResult::Dirty { dirty_confirmation } => {
+            Ok(WorkspaceDiscardResponse {
+                overview: workspace_overview_for_state(&app_state),
+                dirty_confirmation: Some(dirty_confirmation),
+                warnings: Vec::new(),
+            })
+        }
+        workspace_removal::WorkspaceDiscardResult::Discarded { warnings } => {
+            state.save(&app_state)?;
+            Ok(WorkspaceDiscardResponse {
+                overview: workspace_overview_for_state(&app_state),
+                dirty_confirmation: None,
+                warnings,
+            })
+        }
+    }
 }
 
 #[tauri::command]
@@ -1035,61 +779,28 @@ fn application_reset(
     request: ApplicationResetRequest,
 ) -> Result<ApplicationResetResponse, String> {
     let mut app_state = workspace_state.app_state.lock().map_err(lock_error)?;
-    let workspaces = app_state
-        .open_workspaces
-        .iter()
-        .filter_map(|workspace| {
-            app_state
-                .projects
-                .iter()
-                .find(|project| project.id == workspace.project_id)
-                .map(|project| WorkspaceCleanupTarget {
-                    workspace: workspace.clone(),
-                    project: project.clone(),
-                })
-        })
-        .collect::<Vec<_>>();
-    let cleanup_workspaces =
-        cleanup_targets_for_managed_workspaces(&workspace_state.app_data_dir, &workspaces);
-
-    if let Some(dirty_confirmation) = dirty_confirmation_for_workspaces(&cleanup_workspaces)? {
-        if !request.confirm_dirty {
-            return Ok(ApplicationResetResponse {
-                overview: workspace_overview_for_state(&app_state),
-                dirty_confirmation: Some(dirty_confirmation),
-                warnings: Vec::new(),
-            });
-        }
-    }
-
-    terminal_state.close_all()?;
-
-    if let Some(dirty_confirmation) = dirty_confirmation_for_workspaces(&cleanup_workspaces)? {
-        if !request.confirm_dirty {
-            return Ok(ApplicationResetResponse {
-                overview: workspace_overview_for_state(&app_state),
-                dirty_confirmation: Some(dirty_confirmation),
-                warnings: Vec::new(),
-            });
-        }
-    }
-
-    let mut warnings = Vec::new();
-    remove_workspace_roots(
+    match workspace_removal::application_reset(
+        &mut app_state,
         &workspace_state.app_data_dir,
-        &cleanup_workspaces,
+        &terminal_state,
         request.confirm_dirty,
-        &mut warnings,
-    )?;
-
-    *app_state = PersistedAppState::default();
-    workspace_state.save(&app_state)?;
-
-    Ok(ApplicationResetResponse {
-        overview: workspace_overview_for_state(&app_state),
-        dirty_confirmation: None,
-        warnings,
-    })
+    )? {
+        workspace_removal::ApplicationResetResult::Dirty { dirty_confirmation } => {
+            Ok(ApplicationResetResponse {
+                overview: workspace_overview_for_state(&app_state),
+                dirty_confirmation: Some(dirty_confirmation),
+                warnings: Vec::new(),
+            })
+        }
+        workspace_removal::ApplicationResetResult::Reset { warnings } => {
+            workspace_state.save(&app_state)?;
+            Ok(ApplicationResetResponse {
+                overview: workspace_overview_for_state(&app_state),
+                dirty_confirmation: None,
+                warnings,
+            })
+        }
+    }
 }
 
 #[tauri::command]
@@ -1100,11 +811,11 @@ fn terminal_create(
     request: TerminalCreateRequest,
 ) -> Result<TerminalCreateResponse, String> {
     let cwd = normalize_cwd(&workspace_state, &request.workspace_id, &request.cwd)?;
-    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let developer_environment = resolve_for_cwd(&cwd);
     let tool_tile =
         tool_integration_tile_for_launch(&workspace_state, &request.workspace_id, &request.launch)?;
     if let Some(tool_tile) = &tool_tile {
-        ensure_tool_available(&shell, tool_tile)?;
+        ensure_tool_available(&developer_environment, &cwd, tool_tile)?;
     }
 
     let launch_plan = terminal_launch_plan_for_resolved_tool(&request.launch, tool_tile.as_ref())?;
@@ -1114,7 +825,8 @@ fn terminal_create(
             workspace_id: request.workspace_id,
             tile_id: request.tile_id,
             cwd,
-            shell,
+            shell: developer_environment.shell,
+            environment: developer_environment.variables,
             cols: request.cols,
             rows: request.rows,
             shell_command: launch_plan.shell_command,
@@ -1132,16 +844,10 @@ fn integration_catalog_list(
     workspace_state: State<'_, WorkspaceState>,
     request: IntegrationCatalogListRequest,
 ) -> Result<IntegrationCatalogResponse, String> {
-    let snapshot =
-        extension_catalog_for_workspace(&workspace_state, request.workspace_id.as_deref());
-    Ok(IntegrationCatalogResponse {
-        tiles: snapshot
-            .tiles
-            .into_iter()
-            .map(integration_catalog_tile_response)
-            .collect(),
-        diagnostics: snapshot.diagnostics,
-    })
+    Ok(
+        extension_catalog_for_workspace(&workspace_state, request.workspace_id.as_deref())
+            .into_catalog_response(),
+    )
 }
 
 #[tauri::command]
@@ -1149,12 +855,10 @@ fn extension_settings_list(
     workspace_state: State<'_, WorkspaceState>,
     request: ExtensionSettingsListRequest,
 ) -> Result<ExtensionSettingsResponse, String> {
-    let snapshot =
-        extension_catalog_for_workspace(&workspace_state, request.workspace_id.as_deref());
-    Ok(ExtensionSettingsResponse {
-        extensions: snapshot.extensions,
-        diagnostics: snapshot.diagnostics,
-    })
+    Ok(
+        extension_catalog_for_workspace(&workspace_state, request.workspace_id.as_deref())
+            .into_settings_response(),
+    )
 }
 
 #[tauri::command]
@@ -1162,13 +866,11 @@ fn integration_tool_availability_list(
     workspace_state: State<'_, WorkspaceState>,
     request: ToolAvailabilityListRequest,
 ) -> Result<Vec<ToolAvailabilityResponse>, String> {
-    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let cwd = workspace_cwd_for_optional_id(&workspace_state, request.workspace_id.as_deref())?;
+    let developer_environment = resolve_for_cwd(&cwd);
     Ok(
         extension_catalog_for_workspace(&workspace_state, request.workspace_id.as_deref())
-            .tiles
-            .into_iter()
-            .map(|tile| tool_availability_for_tile(&shell, &tile))
-            .collect(),
+            .into_tool_availability_response(&developer_environment, &cwd),
     )
 }
 
@@ -1928,732 +1630,6 @@ fn is_valid_resume_identifier(identifier: &str) -> bool {
         && !identifier.contains('\r')
 }
 
-fn integration_catalog() -> IntegrationCatalog {
-    serde_json::from_str(INTEGRATION_CATALOG_JSON)
-        .expect("integration catalog should be valid JSON")
-}
-
-#[derive(Debug, Clone)]
-struct ExtensionCatalogSnapshot {
-    tiles: Vec<ToolIntegrationTile>,
-    diagnostics: Vec<ExtensionDiagnostic>,
-    extensions: Vec<ExtensionSettingsEntry>,
-}
-
-fn extension_catalog_for_workspace(
-    workspace_state: &WorkspaceState,
-    workspace_id: Option<&str>,
-) -> ExtensionCatalogSnapshot {
-    let core_tiles = core_tool_integration_tiles();
-    let mut snapshot = ExtensionCatalogSnapshot {
-        tiles: core_tiles.clone(),
-        diagnostics: Vec::new(),
-        extensions: vec![core_extension_settings_entry(&core_tiles)],
-    };
-
-    let global_root = workspace_state.app_data_dir.join("extensions");
-    load_extension_directory(&global_root, "global", None, None, &mut snapshot);
-
-    if let Some((project_id, project_root)) =
-        project_scope_for_workspace(workspace_state, workspace_id)
-    {
-        let project_root_path = PathBuf::from(&project_root)
-            .join(".fluidity")
-            .join("extensions");
-        load_extension_directory(
-            &project_root_path,
-            "project",
-            Some(project_id),
-            Some(project_root),
-            &mut snapshot,
-        );
-    }
-
-    snapshot
-}
-
-fn project_scope_for_workspace(
-    workspace_state: &WorkspaceState,
-    workspace_id: Option<&str>,
-) -> Option<(String, String)> {
-    let workspace_id = workspace_id?;
-    let app_state = workspace_state.app_state.lock().ok()?;
-    let workspace = app_state
-        .open_workspaces
-        .iter()
-        .find(|workspace| workspace.id == workspace_id)?;
-    let project = app_state
-        .projects
-        .iter()
-        .find(|project| project.id == workspace.project_id)?;
-    Some((project.id.clone(), project.root.clone()))
-}
-
-fn core_tool_integration_tiles() -> Vec<ToolIntegrationTile> {
-    let provenance = ExtensionContributionProvenance {
-        source_kind: "core".to_string(),
-        extension_id: CORE_EXTENSION_ID.to_string(),
-        manifest_path: None,
-        project_id: None,
-        project_root: None,
-    };
-
-    integration_catalog()
-        .integrations
-        .into_iter()
-        .flat_map(|integration| {
-            let integration_title = integration.title.clone();
-            integration
-                .tiles
-                .into_iter()
-                .map(move |tile| (integration.id.clone(), integration_title.clone(), tile))
-        })
-        .filter_map(|(integration_id, integration_title, tile)| {
-            if tile.kind == "tool" {
-                tool_integration_tile_from_core_catalog(
-                    integration_id,
-                    integration_title,
-                    tile,
-                    provenance.clone(),
-                )
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-fn core_extension_settings_entry(tiles: &[ToolIntegrationTile]) -> ExtensionSettingsEntry {
-    ExtensionSettingsEntry {
-        source_kind: "core".to_string(),
-        extension_id: CORE_EXTENSION_ID.to_string(),
-        title: "Core Extension Pack".to_string(),
-        status: "loaded".to_string(),
-        manifest_path: None,
-        project_id: None,
-        project_root: None,
-        diagnostics: Vec::new(),
-        tiles: tiles
-            .iter()
-            .map(extension_settings_tile_from_tool_tile)
-            .collect(),
-    }
-}
-
-fn tool_integration_tile(
-    workspace_state: &WorkspaceState,
-    workspace_id: Option<&str>,
-    extension_id: &str,
-    integration_id: &str,
-    integration_tile_id: &str,
-) -> Option<ToolIntegrationTile> {
-    extension_catalog_for_workspace(workspace_state, workspace_id)
-        .tiles
-        .into_iter()
-        .find(|tile| {
-            tile.extension_id == extension_id
-                && tile.integration_id == integration_id
-                && tile.integration_tile_id == integration_tile_id
-        })
-}
-
-fn tool_integration_tile_for_tile(tile: &PersistedTile) -> Option<ToolIntegrationTile> {
-    let extension_id = tile.extension_id.as_deref().unwrap_or(CORE_EXTENSION_ID);
-    core_tool_integration_tiles().into_iter().find(|candidate| {
-        candidate.extension_id == extension_id
-            && candidate.integration_id == tile.integration_id.as_deref().unwrap_or_default()
-            && candidate.integration_tile_id
-                == tile.integration_tile_id.as_deref().unwrap_or_default()
-    })
-}
-
-fn legacy_tool_integration_tile(
-    legacy_tool_id: Option<&str>,
-    legacy_initial_command: Option<&str>,
-) -> Option<ToolIntegrationTile> {
-    let legacy_id = legacy_tool_id.or(legacy_initial_command)?;
-    core_tool_integration_tiles()
-        .into_iter()
-        .find(|tile| {
-            tile.command_argv.first().is_some_and(|command| command == legacy_id)
-                || matches!(&tile.resume, ToolResumeStrategy::CoreProvider { provider } if provider == legacy_id)
-        })
-}
-
-fn tool_integration_tile_from_core_catalog(
-    integration_id: String,
-    _integration_title: String,
-    tile: IntegrationCatalogTile,
-    provenance: ExtensionContributionProvenance,
-) -> Option<ToolIntegrationTile> {
-    let tool_command = tile.tool_command?;
-    let resume_provider = tile.resume_provider.unwrap_or_else(|| tool_command.clone());
-    Some(ToolIntegrationTile {
-        extension_id: CORE_EXTENSION_ID.to_string(),
-        integration_id,
-        integration_tile_id: tile.id,
-        title: tile.title,
-        default_visible: tile.default_visible,
-        icon: tile.icon_key.map(|key| ExtensionIcon::Key { key }),
-        command_argv: vec![tool_command],
-        resume: ToolResumeStrategy::CoreProvider {
-            provider: resume_provider,
-        },
-        provenance,
-    })
-}
-
-fn load_extension_directory(
-    root: &Path,
-    source_kind: &str,
-    project_id: Option<String>,
-    project_root: Option<String>,
-    snapshot: &mut ExtensionCatalogSnapshot,
-) {
-    let entries = match fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-        Err(error) => {
-            snapshot.diagnostics.push(extension_diagnostic(
-                "error",
-                format!(
-                    "Could not read Extension directory {}: {}",
-                    root.display(),
-                    error
-                ),
-                source_kind,
-                "unknown",
-                Some(root.to_string_lossy().to_string()),
-                project_id,
-                project_root,
-            ));
-            return;
-        }
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let extension_dir_name = entry.file_name().to_string_lossy().to_string();
-        let manifest_path = path.join(EXTENSION_DEFINITION_FILE);
-        if !manifest_path.is_file() {
-            continue;
-        }
-        load_extension_definition(
-            &manifest_path,
-            &extension_dir_name,
-            source_kind,
-            project_id.clone(),
-            project_root.clone(),
-            snapshot,
-        );
-    }
-}
-
-fn extension_settings_entry(
-    source_kind: &str,
-    extension_id: &str,
-    title: &str,
-    status: &str,
-    manifest_path: Option<String>,
-    project_id: Option<String>,
-    project_root: Option<String>,
-    diagnostics: Vec<ExtensionDiagnostic>,
-    tiles: Vec<ExtensionSettingsTile>,
-) -> ExtensionSettingsEntry {
-    ExtensionSettingsEntry {
-        source_kind: source_kind.to_string(),
-        extension_id: extension_id.to_string(),
-        title: if title.trim().is_empty() {
-            extension_id.to_string()
-        } else {
-            title.to_string()
-        },
-        status: status.to_string(),
-        manifest_path,
-        project_id,
-        project_root,
-        diagnostics,
-        tiles,
-    }
-}
-
-fn load_extension_definition(
-    manifest_path: &Path,
-    extension_dir_name: &str,
-    source_kind: &str,
-    project_id: Option<String>,
-    project_root: Option<String>,
-    snapshot: &mut ExtensionCatalogSnapshot,
-) {
-    let manifest_path_string = manifest_path.to_string_lossy().to_string();
-    let bytes = match fs::read(manifest_path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            let diagnostic = extension_diagnostic(
-                "error",
-                format!(
-                    "Could not read Extension Definition {}: {}",
-                    manifest_path.display(),
-                    error
-                ),
-                source_kind,
-                extension_dir_name,
-                Some(manifest_path_string.clone()),
-                project_id.clone(),
-                project_root.clone(),
-            );
-            snapshot.diagnostics.push(diagnostic.clone());
-            snapshot.extensions.push(extension_settings_entry(
-                source_kind,
-                extension_dir_name,
-                extension_dir_name,
-                "invalid",
-                Some(manifest_path_string),
-                project_id,
-                project_root,
-                vec![diagnostic],
-                Vec::new(),
-            ));
-            return;
-        }
-    };
-
-    let definition = match serde_json::from_slice::<ExtensionDefinition>(&bytes) {
-        Ok(definition) => definition,
-        Err(error) => {
-            let diagnostic = extension_diagnostic(
-                "error",
-                format!(
-                    "Invalid Extension Definition {}: {}",
-                    manifest_path.display(),
-                    error
-                ),
-                source_kind,
-                extension_dir_name,
-                Some(manifest_path_string.clone()),
-                project_id.clone(),
-                project_root.clone(),
-            );
-            snapshot.diagnostics.push(diagnostic.clone());
-            snapshot.extensions.push(extension_settings_entry(
-                source_kind,
-                extension_dir_name,
-                extension_dir_name,
-                "invalid",
-                Some(manifest_path_string),
-                project_id,
-                project_root,
-                vec![diagnostic],
-                Vec::new(),
-            ));
-            return;
-        }
-    };
-
-    if let Err(message) = validate_extension_definition(&definition, extension_dir_name) {
-        let diagnostic = extension_diagnostic(
-            "error",
-            format!(
-                "Invalid Extension Definition {}: {}",
-                manifest_path.display(),
-                message
-            ),
-            source_kind,
-            &definition.id,
-            Some(manifest_path_string.clone()),
-            project_id.clone(),
-            project_root.clone(),
-        );
-        snapshot.diagnostics.push(diagnostic.clone());
-        snapshot.extensions.push(extension_settings_entry(
-            source_kind,
-            &definition.id,
-            &definition.title,
-            "invalid",
-            Some(manifest_path_string),
-            project_id,
-            project_root,
-            vec![diagnostic],
-            Vec::new(),
-        ));
-        return;
-    }
-
-    if snapshot
-        .tiles
-        .iter()
-        .any(|tile| tile.extension_id == definition.id)
-    {
-        let diagnostic = extension_diagnostic(
-            "error",
-            format!(
-                "Extension `{}` is already loaded in this scope; skipping duplicate",
-                definition.id
-            ),
-            source_kind,
-            &definition.id,
-            Some(manifest_path_string.clone()),
-            project_id.clone(),
-            project_root.clone(),
-        );
-        snapshot.diagnostics.push(diagnostic.clone());
-        snapshot.extensions.push(extension_settings_entry(
-            source_kind,
-            &definition.id,
-            &definition.title,
-            "skipped",
-            Some(manifest_path_string),
-            project_id,
-            project_root,
-            vec![diagnostic],
-            Vec::new(),
-        ));
-        return;
-    }
-
-    let provenance = ExtensionContributionProvenance {
-        source_kind: source_kind.to_string(),
-        extension_id: definition.id.clone(),
-        manifest_path: Some(manifest_path_string.clone()),
-        project_id,
-        project_root,
-    };
-    let mut extension_diagnostics = Vec::new();
-    let mut extension_tiles = Vec::new();
-
-    for integration in definition.contributes.integrations {
-        for tile in integration.tiles {
-            let duplicate = snapshot.tiles.iter().any(|existing| {
-                existing.extension_id == definition.id
-                    && existing.integration_id == integration.id
-                    && existing.integration_tile_id == tile.id
-            });
-            if duplicate {
-                let diagnostic = extension_diagnostic(
-                    "error",
-                    format!(
-                        "Duplicate Integration Tile Contribution `{}:{}.{}`; skipping duplicate",
-                        definition.id, integration.id, tile.id
-                    ),
-                    source_kind,
-                    &definition.id,
-                    Some(manifest_path_string.clone()),
-                    provenance.project_id.clone(),
-                    provenance.project_root.clone(),
-                );
-                snapshot.diagnostics.push(diagnostic.clone());
-                extension_diagnostics.push(diagnostic);
-                continue;
-            }
-
-            let resume = match tile.resume.unwrap_or(ExtensionResume::None) {
-                ExtensionResume::None => ToolResumeStrategy::None,
-                ExtensionResume::SessionIdArg { arg } => ToolResumeStrategy::SessionIdArg {
-                    provider: extension_resume_provider(&definition.id, &integration.id, &tile.id),
-                    arg,
-                },
-            };
-            let icon = tile
-                .icon
-                .or_else(|| integration.icon.clone())
-                .or_else(|| definition.icon.clone());
-            let tool_tile = ToolIntegrationTile {
-                extension_id: definition.id.clone(),
-                integration_id: integration.id.clone(),
-                integration_tile_id: tile.id,
-                title: tile.title,
-                default_visible: tile.default_visible,
-                icon,
-                command_argv: tile.command.argv,
-                resume,
-                provenance: provenance.clone(),
-            };
-            extension_tiles.push(extension_settings_tile_from_tool_tile(&tool_tile));
-            snapshot.tiles.push(tool_tile);
-        }
-    }
-
-    snapshot.extensions.push(extension_settings_entry(
-        source_kind,
-        &definition.id,
-        &definition.title,
-        "loaded",
-        Some(manifest_path_string),
-        provenance.project_id,
-        provenance.project_root,
-        extension_diagnostics,
-        extension_tiles,
-    ));
-}
-
-fn validate_extension_definition(
-    definition: &ExtensionDefinition,
-    extension_dir_name: &str,
-) -> Result<(), String> {
-    if definition.schema_version != 1 {
-        return Err("schemaVersion must be 1".to_string());
-    }
-    if definition.id == CORE_EXTENSION_ID {
-        return Err(format!(
-            "{} is reserved for the Core Extension Pack",
-            CORE_EXTENSION_ID
-        ));
-    }
-    if definition.id != extension_dir_name {
-        return Err(format!(
-            "Extension directory `{}` must match Extension id `{}`",
-            extension_dir_name, definition.id
-        ));
-    }
-    if !is_valid_extension_id(&definition.id) {
-        return Err(format!("invalid Extension id `{}`", definition.id));
-    }
-    if definition.title.trim().is_empty() {
-        return Err("Extension title must not be empty".to_string());
-    }
-    if definition.contributes.integrations.is_empty() {
-        return Err("contributes.integrations must not be empty".to_string());
-    }
-
-    for integration in &definition.contributes.integrations {
-        if !is_valid_contribution_id(&integration.id) {
-            return Err(format!("invalid Integration id `{}`", integration.id));
-        }
-        if integration.title.trim().is_empty() {
-            return Err(format!(
-                "Integration `{}` title must not be empty",
-                integration.id
-            ));
-        }
-        if integration.tiles.is_empty() {
-            return Err(format!(
-                "Integration `{}` must include at least one Tile",
-                integration.id
-            ));
-        }
-        for tile in &integration.tiles {
-            if !is_valid_contribution_id(&tile.id) {
-                return Err(format!("invalid Integration Tile id `{}`", tile.id));
-            }
-            if tile.kind != "tool" {
-                return Err(format!(
-                    "Integration Tile `{}` kind must be `tool`",
-                    tile.id
-                ));
-            }
-            if tile.title.trim().is_empty() {
-                return Err(format!(
-                    "Integration Tile `{}` title must not be empty",
-                    tile.id
-                ));
-            }
-            if tile.command.argv.is_empty() {
-                return Err(format!(
-                    "Integration Tile `{}` command.argv must not be empty",
-                    tile.id
-                ));
-            }
-            for arg in &tile.command.argv {
-                if arg.is_empty() || arg.contains('\0') || arg.contains('\n') || arg.contains('\r')
-                {
-                    return Err(format!(
-                        "Integration Tile `{}` command.argv contains an invalid argv entry",
-                        tile.id
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn extension_settings_tile_from_tool_tile(tile: &ToolIntegrationTile) -> ExtensionSettingsTile {
-    ExtensionSettingsTile {
-        integration_id: tile.integration_id.clone(),
-        integration_tile_id: tile.integration_tile_id.clone(),
-        title: tile.title.clone(),
-        default_visible: tile.default_visible,
-    }
-}
-
-fn integration_catalog_tile_response(tile: ToolIntegrationTile) -> IntegrationCatalogTileResponse {
-    IntegrationCatalogTileResponse {
-        extension_id: tile.extension_id,
-        integration_id: tile.integration_id,
-        integration_tile_id: tile.integration_tile_id,
-        title: tile.title.clone(),
-        default_visible: tile.default_visible,
-        icon: Some(extension_icon_response(tile.icon, &tile.title)),
-        provenance: tile.provenance,
-    }
-}
-
-fn extension_icon_response(
-    icon: Option<ExtensionIcon>,
-    fallback_title: &str,
-) -> ExtensionIconResponse {
-    let fallback_text = fallback_icon_text(fallback_title);
-    match icon {
-        Some(ExtensionIcon::Key { key }) if is_first_party_icon_key(&key) => {
-            ExtensionIconResponse::Key { key, fallback_text }
-        }
-        Some(ExtensionIcon::Path { path }) => ExtensionIconResponse::Path {
-            path,
-            fallback_text,
-        },
-        _ => ExtensionIconResponse::Text { fallback_text },
-    }
-}
-
-fn fallback_icon_text(title: &str) -> String {
-    title
-        .split_whitespace()
-        .filter_map(|word| word.chars().next())
-        .take(2)
-        .collect::<String>()
-        .to_uppercase()
-}
-
-fn tool_availability_for_tile(shell: &str, tile: &ToolIntegrationTile) -> ToolAvailabilityResponse {
-    let command = tile.command_argv.first().cloned().unwrap_or_default();
-    let check_command = format!("command -v {}", shell_escape_arg(&command));
-    match Command::new(shell).arg("-lc").arg(check_command).output() {
-        Ok(output) => {
-            let resolved_path = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .map(str::trim)
-                .filter(|path| !path.is_empty())
-                .map(str::to_string);
-
-            if output.status.success() && resolved_path.is_some() {
-                ToolAvailabilityResponse {
-                    extension_id: tile.extension_id.clone(),
-                    integration_id: tile.integration_id.clone(),
-                    integration_tile_id: tile.integration_tile_id.clone(),
-                    title: tile.title.clone(),
-                    command,
-                    status: ToolAvailabilityStatus::Available,
-                    resolved_path,
-                    detail: None,
-                    provenance: tile.provenance.clone(),
-                }
-            } else {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                ToolAvailabilityResponse {
-                    extension_id: tile.extension_id.clone(),
-                    integration_id: tile.integration_id.clone(),
-                    integration_tile_id: tile.integration_tile_id.clone(),
-                    title: tile.title.clone(),
-                    command,
-                    status: ToolAvailabilityStatus::Unavailable,
-                    resolved_path: None,
-                    detail: if stderr.is_empty() {
-                        None
-                    } else {
-                        Some(stderr)
-                    },
-                    provenance: tile.provenance.clone(),
-                }
-            }
-        }
-        Err(error) => ToolAvailabilityResponse {
-            extension_id: tile.extension_id.clone(),
-            integration_id: tile.integration_id.clone(),
-            integration_tile_id: tile.integration_tile_id.clone(),
-            title: tile.title.clone(),
-            command,
-            status: ToolAvailabilityStatus::Unknown,
-            resolved_path: None,
-            detail: Some(error.to_string()),
-            provenance: tile.provenance.clone(),
-        },
-    }
-}
-
-fn ensure_tool_available(shell: &str, tile: &ToolIntegrationTile) -> Result<(), String> {
-    let availability = tool_availability_for_tile(shell, tile);
-    let command = tile.command_argv.first().cloned().unwrap_or_default();
-    match availability.status {
-        ToolAvailabilityStatus::Available => Ok(()),
-        ToolAvailabilityStatus::Unavailable => Err(format!(
-            "{} CLI is not installed or is not on Fluidity's PATH. Install `{}` and try again.",
-            tile.title, command
-        )),
-        ToolAvailabilityStatus::Unknown => Err(format!(
-            "Fluidity could not verify whether the {} CLI is installed. {}",
-            tile.title,
-            availability.detail.unwrap_or_else(|| {
-                "Check your shell and PATH settings, then try again.".to_string()
-            })
-        )),
-    }
-}
-
-fn extension_diagnostic(
-    severity: &str,
-    message: String,
-    source_kind: &str,
-    extension_id: &str,
-    manifest_path: Option<String>,
-    project_id: Option<String>,
-    project_root: Option<String>,
-) -> ExtensionDiagnostic {
-    ExtensionDiagnostic {
-        severity: severity.to_string(),
-        message,
-        source_kind: source_kind.to_string(),
-        extension_id: extension_id.to_string(),
-        manifest_path,
-        project_id,
-        project_root,
-    }
-}
-
-fn extension_resume_provider(extension_id: &str, integration_id: &str, tile_id: &str) -> String {
-    format!("{}.{}.{}", extension_id, integration_id, tile_id)
-}
-
-fn is_first_party_icon_key(key: &str) -> bool {
-    matches!(key, "claude" | "codex" | "gemini" | "opencode" | "pi")
-}
-
-fn is_valid_extension_id(id: &str) -> bool {
-    is_valid_segmented_id(id, 3, 128, b".-")
-}
-
-fn is_valid_contribution_id(id: &str) -> bool {
-    is_valid_segmented_id(id, 1, 64, b"._-")
-}
-
-fn is_valid_segmented_id(id: &str, min_len: usize, max_len: usize, separators: &[u8]) -> bool {
-    if id.len() < min_len || id.len() > max_len {
-        return false;
-    }
-
-    let bytes = id.as_bytes();
-    if !bytes[0].is_ascii_lowercase() {
-        return false;
-    }
-    let mut previous_was_separator = false;
-    for byte in bytes {
-        let separator = separators.contains(byte);
-        if separator && previous_was_separator {
-            return false;
-        }
-        if !(byte.is_ascii_lowercase() || byte.is_ascii_digit() || separator) {
-            return false;
-        }
-        previous_was_separator = separator;
-    }
-
-    !previous_was_separator
-}
-
 fn is_valid_tile_geometry(tile: &PersistedTile) -> bool {
     tile.x >= 0
         && tile.y >= 0
@@ -2665,12 +1641,6 @@ fn is_valid_tile_geometry(tile: &PersistedTile) -> bool {
 
 fn tiles_overlap(a: &PersistedTile, b: &PersistedTile) -> bool {
     a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
-}
-
-#[derive(Debug, Clone)]
-struct WorkspaceCleanupTarget {
-    workspace: OpenWorkspace,
-    project: RegisteredProject,
 }
 
 fn migrate_workspace_stack(app_state: &mut PersistedAppState) {
@@ -2717,111 +1687,458 @@ fn set_current_workspace(app_state: &mut PersistedAppState, workspace_id: &str) 
         .insert(0, workspace_id.to_string());
 }
 
-fn remove_workspaces_from_state(
-    app_state: &mut PersistedAppState,
-    workspace_ids: &[String],
-) -> usize {
-    let ids = workspace_ids.iter().cloned().collect::<HashSet<_>>();
-    let original_workspace_count = app_state.open_workspaces.len();
-    app_state
-        .open_workspaces
-        .retain(|workspace| !ids.contains(&workspace.id));
-    app_state
-        .workspace_stack
-        .retain(|workspace_id| !ids.contains(workspace_id));
-    original_workspace_count - app_state.open_workspaces.len()
-}
+mod workspace_removal {
+    use super::*;
 
-fn workspace_cleanup_target(
-    app_state: &PersistedAppState,
-    workspace_id: &str,
-) -> Result<WorkspaceCleanupTarget, String> {
-    let workspace = app_state
-        .open_workspaces
-        .iter()
-        .find(|workspace| workspace.id == workspace_id)
-        .cloned()
-        .ok_or_else(|| "workspace not found".to_string())?;
-    let project = app_state
-        .projects
-        .iter()
-        .find(|project| project.id == workspace.project_id)
-        .cloned()
-        .ok_or_else(|| "workspace project not found".to_string())?;
-    Ok(WorkspaceCleanupTarget { workspace, project })
-}
-
-fn workspaces_by_ids(
-    app_state: &PersistedAppState,
-    workspace_ids: &[String],
-) -> Vec<WorkspaceCleanupTarget> {
-    workspace_ids
-        .iter()
-        .filter_map(|workspace_id| workspace_cleanup_target(app_state, workspace_id).ok())
-        .collect()
-}
-
-fn cleanup_targets_for_managed_workspaces(
-    app_data_dir: &Path,
-    targets: &[WorkspaceCleanupTarget],
-) -> Vec<WorkspaceCleanupTarget> {
-    targets
-        .iter()
-        .filter(|target| workspace_discardable(app_data_dir, &target.project, &target.workspace))
-        .cloned()
-        .collect()
-}
-
-fn close_terminal_workspaces(
-    terminal_state: &TerminalState,
-    targets: &[WorkspaceCleanupTarget],
-) -> Result<(), String> {
-    let workspaces = targets
-        .iter()
-        .map(|target| {
-            (
-                target.workspace.id.clone(),
-                PathBuf::from(&target.workspace.root),
-            )
-        })
-        .collect::<Vec<_>>();
-    terminal_state.close_workspaces(&workspaces)
-}
-
-fn dirty_confirmation_for_workspaces(
-    targets: &[WorkspaceCleanupTarget],
-) -> Result<Option<DirtyConfirmation>, String> {
-    let summaries = targets
-        .iter()
-        .filter_map(
-            |target| match dirty_workspace_summary(&target.workspace.root) {
-                Ok(Some(summary)) => Some(Ok(summary)),
-                Ok(None) => None,
-                Err(error) => Some(Err(error)),
-            },
-        )
-        .collect::<Result<Vec<_>, _>>()?;
-
-    if summaries.is_empty() {
-        return Ok(None);
+    #[derive(Debug, Clone)]
+    pub(super) struct WorkspaceCleanupTarget {
+        pub(super) workspace: OpenWorkspace,
+        pub(super) project: RegisteredProject,
     }
 
-    let changed_file_count = summaries
-        .iter()
-        .map(|summary| summary.changed_file_count)
-        .sum();
-    let sample_paths = summaries
-        .iter()
-        .flat_map(|summary| summary.sample_paths.clone())
-        .take(10)
-        .collect::<Vec<_>>();
+    pub(super) enum ProjectDisconnectResult {
+        Dirty {
+            project: RegisteredProject,
+            dirty_confirmation: DirtyConfirmation,
+        },
+        Disconnected {
+            project: RegisteredProject,
+            removed_workspace_count: usize,
+            warnings: Vec<String>,
+        },
+    }
 
-    Ok(Some(DirtyConfirmation {
-        dirty_workspace_count: summaries.len(),
-        changed_file_count,
-        sample_paths,
-        message: "Uncommitted Workspace changes will be deleted.".to_string(),
-    }))
+    pub(super) enum WorkspaceDiscardResult {
+        Dirty {
+            dirty_confirmation: DirtyConfirmation,
+        },
+        Discarded {
+            warnings: Vec<String>,
+        },
+    }
+
+    pub(super) enum ApplicationResetResult {
+        Dirty {
+            dirty_confirmation: DirtyConfirmation,
+        },
+        Reset {
+            warnings: Vec<String>,
+        },
+    }
+
+    pub(super) fn project_disconnect(
+        app_state: &mut PersistedAppState,
+        app_data_dir: &Path,
+        terminal_state: &TerminalState,
+        project_id: &str,
+        confirm_dirty: bool,
+    ) -> Result<ProjectDisconnectResult, String> {
+        let (project_index, project, workspace_ids, workspaces) =
+            select_project_disconnect_targets(app_state, project_id)?;
+        let cleanup_workspaces = cleanup_targets_for_managed_workspaces(app_data_dir, &workspaces);
+
+        if let Some(dirty_confirmation) =
+            confirm_dirty_then_close_runtime(&cleanup_workspaces, confirm_dirty, || {
+                close_terminal_workspaces(terminal_state, &workspaces)
+            })?
+        {
+            return Ok(ProjectDisconnectResult::Dirty {
+                project,
+                dirty_confirmation,
+            });
+        }
+
+        let mut warnings = Vec::new();
+        remove_workspace_roots(
+            app_data_dir,
+            &cleanup_workspaces,
+            confirm_dirty,
+            &mut warnings,
+        )?;
+
+        let project = app_state.projects.remove(project_index);
+        let removed_workspace_count = remove_workspaces_from_state(app_state, &workspace_ids);
+        normalize_workspace_stack(app_state);
+
+        Ok(ProjectDisconnectResult::Disconnected {
+            project,
+            removed_workspace_count,
+            warnings,
+        })
+    }
+
+    pub(super) fn workspace_discard(
+        app_state: &mut PersistedAppState,
+        app_data_dir: &Path,
+        terminal_state: &TerminalState,
+        workspace_id: &str,
+        confirm_dirty: bool,
+    ) -> Result<WorkspaceDiscardResult, String> {
+        let target = workspace_discard_target(app_state, workspace_id)?;
+        if !workspace_discardable(app_data_dir, &target.project, &target.workspace) {
+            return Err("workspace is not discardable".to_string());
+        }
+        let cleanup_workspaces = vec![target.clone()];
+
+        if let Some(dirty_confirmation) =
+            confirm_dirty_then_close_runtime(&cleanup_workspaces, confirm_dirty, || {
+                close_terminal_workspaces(terminal_state, &cleanup_workspaces)
+            })?
+        {
+            return Ok(WorkspaceDiscardResult::Dirty { dirty_confirmation });
+        }
+
+        let mut warnings = Vec::new();
+        remove_workspace_roots(
+            app_data_dir,
+            &cleanup_workspaces,
+            confirm_dirty,
+            &mut warnings,
+        )?;
+        delete_workspace_branch_after_discard(&target, &mut warnings);
+        remove_workspaces_from_state(app_state, &[workspace_id.to_string()]);
+        normalize_workspace_stack(app_state);
+
+        Ok(WorkspaceDiscardResult::Discarded { warnings })
+    }
+
+    pub(super) fn application_reset(
+        app_state: &mut PersistedAppState,
+        app_data_dir: &Path,
+        terminal_state: &TerminalState,
+        confirm_dirty: bool,
+    ) -> Result<ApplicationResetResult, String> {
+        let workspaces = all_workspace_targets(app_state);
+        let cleanup_workspaces = cleanup_targets_for_managed_workspaces(app_data_dir, &workspaces);
+
+        if let Some(dirty_confirmation) =
+            confirm_dirty_then_close_runtime(&cleanup_workspaces, confirm_dirty, || {
+                terminal_state.close_all()
+            })?
+        {
+            return Ok(ApplicationResetResult::Dirty { dirty_confirmation });
+        }
+
+        let mut warnings = Vec::new();
+        remove_workspace_roots(
+            app_data_dir,
+            &cleanup_workspaces,
+            confirm_dirty,
+            &mut warnings,
+        )?;
+        *app_state = PersistedAppState::default();
+
+        Ok(ApplicationResetResult::Reset { warnings })
+    }
+
+    fn select_project_disconnect_targets(
+        app_state: &PersistedAppState,
+        project_id: &str,
+    ) -> Result<
+        (
+            usize,
+            RegisteredProject,
+            Vec<String>,
+            Vec<WorkspaceCleanupTarget>,
+        ),
+        String,
+    > {
+        let project_index = app_state
+            .projects
+            .iter()
+            .position(|project| project.id == project_id)
+            .ok_or_else(|| "project not found".to_string())?;
+        let project = app_state.projects[project_index].clone();
+        let mut workspace_ids = Vec::new();
+        let mut workspaces = Vec::new();
+
+        for workspace in app_state
+            .open_workspaces
+            .iter()
+            .filter(|workspace| workspace.project_id == project.id)
+        {
+            workspace_ids.push(workspace.id.clone());
+            workspaces.push(WorkspaceCleanupTarget {
+                workspace: workspace.clone(),
+                project: project.clone(),
+            });
+        }
+
+        Ok((project_index, project, workspace_ids, workspaces))
+    }
+
+    fn all_workspace_targets(app_state: &PersistedAppState) -> Vec<WorkspaceCleanupTarget> {
+        app_state
+            .open_workspaces
+            .iter()
+            .filter_map(|workspace| {
+                app_state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == workspace.project_id)
+                    .map(|project| WorkspaceCleanupTarget {
+                        workspace: workspace.clone(),
+                        project: project.clone(),
+                    })
+            })
+            .collect()
+    }
+
+    fn workspace_discard_target(
+        app_state: &PersistedAppState,
+        workspace_id: &str,
+    ) -> Result<WorkspaceCleanupTarget, String> {
+        let mut target = workspace_cleanup_target(app_state, workspace_id)?;
+        target.workspace.git_branch =
+            observed_git_branch(target.project.kind, &target.workspace.root)
+                .or(target.workspace.git_branch.clone());
+        Ok(target)
+    }
+
+    fn workspace_cleanup_target(
+        app_state: &PersistedAppState,
+        workspace_id: &str,
+    ) -> Result<WorkspaceCleanupTarget, String> {
+        let workspace = app_state
+            .open_workspaces
+            .iter()
+            .find(|workspace| workspace.id == workspace_id)
+            .cloned()
+            .ok_or_else(|| "workspace not found".to_string())?;
+        let project = app_state
+            .projects
+            .iter()
+            .find(|project| project.id == workspace.project_id)
+            .cloned()
+            .ok_or_else(|| "workspace project not found".to_string())?;
+        Ok(WorkspaceCleanupTarget { workspace, project })
+    }
+
+    fn cleanup_targets_for_managed_workspaces(
+        app_data_dir: &Path,
+        targets: &[WorkspaceCleanupTarget],
+    ) -> Vec<WorkspaceCleanupTarget> {
+        targets
+            .iter()
+            .filter(|target| {
+                workspace_discardable(app_data_dir, &target.project, &target.workspace)
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn confirm_dirty_then_close_runtime<F>(
+        targets: &[WorkspaceCleanupTarget],
+        confirm_dirty: bool,
+        close_runtime: F,
+    ) -> Result<Option<DirtyConfirmation>, String>
+    where
+        F: FnOnce() -> Result<(), String>,
+    {
+        if let Some(dirty_confirmation) = dirty_blocker(targets, confirm_dirty)? {
+            return Ok(Some(dirty_confirmation));
+        }
+
+        close_runtime()?;
+
+        dirty_blocker(targets, confirm_dirty)
+    }
+
+    fn dirty_blocker(
+        targets: &[WorkspaceCleanupTarget],
+        confirm_dirty: bool,
+    ) -> Result<Option<DirtyConfirmation>, String> {
+        let dirty_confirmation = dirty_confirmation_for_workspaces(targets)?;
+        if confirm_dirty {
+            Ok(None)
+        } else {
+            Ok(dirty_confirmation)
+        }
+    }
+
+    fn close_terminal_workspaces(
+        terminal_state: &TerminalState,
+        targets: &[WorkspaceCleanupTarget],
+    ) -> Result<(), String> {
+        let workspaces = targets
+            .iter()
+            .map(|target| {
+                (
+                    target.workspace.id.clone(),
+                    PathBuf::from(&target.workspace.root),
+                )
+            })
+            .collect::<Vec<_>>();
+        terminal_state.close_workspaces(&workspaces)
+    }
+
+    fn dirty_confirmation_for_workspaces(
+        targets: &[WorkspaceCleanupTarget],
+    ) -> Result<Option<DirtyConfirmation>, String> {
+        let summaries = targets
+            .iter()
+            .filter_map(
+                |target| match dirty_workspace_summary(&target.workspace.root) {
+                    Ok(Some(summary)) => Some(Ok(summary)),
+                    Ok(None) => None,
+                    Err(error) => Some(Err(error)),
+                },
+            )
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if summaries.is_empty() {
+            return Ok(None);
+        }
+
+        let changed_file_count = summaries
+            .iter()
+            .map(|summary| summary.changed_file_count)
+            .sum();
+        let sample_paths = summaries
+            .iter()
+            .flat_map(|summary| summary.sample_paths.clone())
+            .take(10)
+            .collect::<Vec<_>>();
+
+        Ok(Some(DirtyConfirmation {
+            dirty_workspace_count: summaries.len(),
+            changed_file_count,
+            sample_paths,
+            message: "Uncommitted Workspace changes will be deleted.".to_string(),
+        }))
+    }
+
+    fn remove_workspace_roots(
+        app_data_dir: &Path,
+        targets: &[WorkspaceCleanupTarget],
+        force: bool,
+        warnings: &mut Vec<String>,
+    ) -> Result<(), String> {
+        for target in targets {
+            remove_workspace_root(app_data_dir, target, force, warnings)?;
+        }
+        Ok(())
+    }
+
+    fn remove_workspace_root(
+        app_data_dir: &Path,
+        target: &WorkspaceCleanupTarget,
+        force: bool,
+        warnings: &mut Vec<String>,
+    ) -> Result<(), String> {
+        let root = Path::new(&target.workspace.root);
+        if !root.is_dir() {
+            let _ = git_command_succeeds(&target.project.root, &["worktree", "prune"]);
+            warnings.push(format!(
+                "Workspace {} was already missing from disk.",
+                target.workspace.name
+            ));
+            return Ok(());
+        }
+
+        if !workspace_discardable(app_data_dir, &target.project, &target.workspace) {
+            return Err("workspace root is not managed by Fluidity".to_string());
+        }
+
+        if Path::new(&target.project.root).is_dir() {
+            let mut args = vec!["worktree", "remove"];
+            if force {
+                args.push("--force");
+            }
+            args.push(&target.workspace.root);
+            run_git_command(&target.project.root, &args).map(|_| ())
+        } else {
+            fs::remove_dir_all(root).map_err(|error| error.to_string())
+        }
+    }
+
+    pub(super) fn delete_workspace_branch_after_discard(
+        target: &WorkspaceCleanupTarget,
+        warnings: &mut Vec<String>,
+    ) {
+        if !target.project.settings.delete_workspace_branch_on_discard {
+            return;
+        }
+        if target.project.kind != ProjectKind::Git {
+            return;
+        }
+
+        let Some(branch) = target.workspace.git_branch.as_deref() else {
+            return;
+        };
+        if branch.trim().is_empty() {
+            return;
+        }
+
+        if !Path::new(&target.project.root).is_dir() {
+            warnings.push(format!(
+                "Local branch {branch} was kept because the Project root is unavailable."
+            ));
+            return;
+        }
+
+        if !local_git_branch_exists(&target.project.root, branch) {
+            return;
+        }
+
+        if observed_git_branch(ProjectKind::Git, &target.project.root).as_deref() == Some(branch) {
+            warnings.push(format!(
+                "Local branch {branch} was kept because it is checked out in the Project root."
+            ));
+            return;
+        }
+
+        if let Err(error) = run_git_command(&target.project.root, &["branch", "-d", "--", branch]) {
+            warnings.push(format!(
+                "Local branch {branch} was kept because git did not consider it safe to delete: {error}"
+            ));
+        }
+    }
+
+    pub(super) fn remove_workspaces_from_state(
+        app_state: &mut PersistedAppState,
+        workspace_ids: &[String],
+    ) -> usize {
+        let ids = workspace_ids.iter().cloned().collect::<HashSet<_>>();
+        let original_workspace_count = app_state.open_workspaces.len();
+        app_state
+            .open_workspaces
+            .retain(|workspace| !ids.contains(&workspace.id));
+        app_state
+            .workspace_stack
+            .retain(|workspace_id| !ids.contains(workspace_id));
+        original_workspace_count - app_state.open_workspaces.len()
+    }
+
+    fn local_git_branch_exists(root: &str, branch: &str) -> bool {
+        local_git_branch_names(root)
+            .map(|branches| branches.contains(branch))
+            .unwrap_or(false)
+    }
+
+    fn workspace_discardable(
+        app_data_dir: &Path,
+        project: &RegisteredProject,
+        workspace: &OpenWorkspace,
+    ) -> bool {
+        project.kind == ProjectKind::Git
+            && managed_workspace_root(app_data_dir, Path::new(&workspace.root))
+    }
+
+    fn managed_workspace_root(app_data_dir: &Path, root: &Path) -> bool {
+        let managed_root = app_data_dir.join("workspaces");
+        if root.is_dir() {
+            let Ok(root) = root.canonicalize() else {
+                return false;
+            };
+            let Ok(managed_root) = managed_root.canonicalize() else {
+                return false;
+            };
+            root.starts_with(managed_root)
+        } else {
+            root.starts_with(managed_root)
+        }
+    }
 }
 
 fn dirty_workspace_summary(root: &str) -> Result<Option<DirtyWorkspaceSummary>, String> {
@@ -2887,123 +2204,6 @@ fn parse_git_numstat_count(value: &str) -> Option<u64> {
         return None;
     }
     value.parse().ok()
-}
-
-fn remove_workspace_roots(
-    app_data_dir: &Path,
-    targets: &[WorkspaceCleanupTarget],
-    force: bool,
-    warnings: &mut Vec<String>,
-) -> Result<(), String> {
-    for target in targets {
-        remove_workspace_root(app_data_dir, target, force, warnings)?;
-    }
-    Ok(())
-}
-
-fn remove_workspace_root(
-    app_data_dir: &Path,
-    target: &WorkspaceCleanupTarget,
-    force: bool,
-    warnings: &mut Vec<String>,
-) -> Result<(), String> {
-    let root = Path::new(&target.workspace.root);
-    if !root.is_dir() {
-        let _ = git_command_succeeds(&target.project.root, &["worktree", "prune"]);
-        warnings.push(format!(
-            "Workspace {} was already missing from disk.",
-            target.workspace.name
-        ));
-        return Ok(());
-    }
-
-    if !workspace_discardable(app_data_dir, &target.project, &target.workspace) {
-        return Err("workspace root is not managed by Fluidity".to_string());
-    }
-
-    if Path::new(&target.project.root).is_dir() {
-        let mut args = vec!["worktree", "remove"];
-        if force {
-            args.push("--force");
-        }
-        args.push(&target.workspace.root);
-        run_git_command(&target.project.root, &args).map(|_| ())
-    } else {
-        fs::remove_dir_all(root).map_err(|error| error.to_string())
-    }
-}
-
-fn delete_workspace_branch_after_discard(
-    target: &WorkspaceCleanupTarget,
-    warnings: &mut Vec<String>,
-) {
-    if !target.project.settings.delete_workspace_branch_on_discard {
-        return;
-    }
-    if target.project.kind != ProjectKind::Git {
-        return;
-    }
-
-    let Some(branch) = target.workspace.git_branch.as_deref() else {
-        return;
-    };
-    if branch.trim().is_empty() {
-        return;
-    }
-
-    if !Path::new(&target.project.root).is_dir() {
-        warnings.push(format!(
-            "Local branch {branch} was kept because the Project root is unavailable."
-        ));
-        return;
-    }
-
-    if !local_git_branch_exists(&target.project.root, branch) {
-        return;
-    }
-
-    if observed_git_branch(ProjectKind::Git, &target.project.root).as_deref() == Some(branch) {
-        warnings.push(format!(
-            "Local branch {branch} was kept because it is checked out in the Project root."
-        ));
-        return;
-    }
-
-    if let Err(error) = run_git_command(&target.project.root, &["branch", "-d", "--", branch]) {
-        warnings.push(format!(
-            "Local branch {branch} was kept because git did not consider it safe to delete: {error}"
-        ));
-    }
-}
-
-fn local_git_branch_exists(root: &str, branch: &str) -> bool {
-    local_git_branch_names(root)
-        .map(|branches| branches.contains(branch))
-        .unwrap_or(false)
-}
-
-fn workspace_discardable(
-    app_data_dir: &Path,
-    project: &RegisteredProject,
-    workspace: &OpenWorkspace,
-) -> bool {
-    project.kind == ProjectKind::Git
-        && managed_workspace_root(app_data_dir, Path::new(&workspace.root))
-}
-
-fn managed_workspace_root(app_data_dir: &Path, root: &Path) -> bool {
-    let managed_root = app_data_dir.join("workspaces");
-    if root.is_dir() {
-        let Ok(root) = root.canonicalize() else {
-            return false;
-        };
-        let Ok(managed_root) = managed_root.canonicalize() else {
-            return false;
-        };
-        root.starts_with(managed_root)
-    } else {
-        root.starts_with(managed_root)
-    }
 }
 
 fn workspace_root_available(workspace: &OpenWorkspace) -> bool {
@@ -3257,227 +2457,24 @@ fn sanitize_path_segment(value: &str) -> String {
     }
 }
 
-struct TerminalLaunchPlan {
-    shell_command: Option<String>,
-    assigned_resume: Option<TileResumeMetadata>,
-}
-
-#[cfg(test)]
-fn terminal_launch_plan(launch: &TerminalLaunchRequest) -> Result<TerminalLaunchPlan, String> {
-    let tool_tile = tool_integration_tile_for_launch_without_project_scope(launch)?;
-    terminal_launch_plan_for_resolved_tool(launch, tool_tile.as_ref())
-}
-
-#[cfg(test)]
-fn tool_integration_tile_for_launch_without_project_scope(
-    launch: &TerminalLaunchRequest,
-) -> Result<Option<ToolIntegrationTile>, String> {
-    if launch.kind != "tool" {
-        return Ok(None);
-    }
-
-    let extension_id = launch.extension_id.as_deref().unwrap_or(CORE_EXTENSION_ID);
-    if let Some((integration_id, integration_tile_id)) = launch
-        .integration_id
-        .as_deref()
-        .zip(launch.integration_tile_id.as_deref())
-    {
-        if let Some(tile) = core_tool_integration_tiles().into_iter().find(|tile| {
-            tile.extension_id == extension_id
-                && tile.integration_id == integration_id
-                && tile.integration_tile_id == integration_tile_id
-        }) {
-            return Ok(Some(tile));
-        }
-        if let Some(tile) = legacy_tool_integration_tile(launch.tool_id.as_deref(), None) {
-            return Ok(Some(tile));
-        }
-        return Err(unresolved_integration_tile_error(
-            extension_id,
-            integration_id,
-            integration_tile_id,
-        ));
-    }
-
-    legacy_tool_integration_tile(launch.tool_id.as_deref(), None)
-        .map(Some)
-        .ok_or_else(|| "unsupported integration tile".to_string())
-}
-
-fn tool_integration_tile_for_launch(
+fn workspace_cwd_for_optional_id(
     workspace_state: &WorkspaceState,
-    workspace_id: &str,
-    launch: &TerminalLaunchRequest,
-) -> Result<Option<ToolIntegrationTile>, String> {
-    if launch.kind != "tool" {
-        return Ok(None);
-    }
-
-    let extension_id = launch.extension_id.as_deref().unwrap_or(CORE_EXTENSION_ID);
-    if let Some((integration_id, integration_tile_id)) = launch
-        .integration_id
-        .as_deref()
-        .zip(launch.integration_tile_id.as_deref())
-    {
-        if let Some(tile) = tool_integration_tile(
-            workspace_state,
-            Some(workspace_id),
-            extension_id,
-            integration_id,
-            integration_tile_id,
-        ) {
-            return Ok(Some(tile));
-        }
-        if let Some(tile) = legacy_tool_integration_tile(launch.tool_id.as_deref(), None) {
-            return Ok(Some(tile));
-        }
-        return Err(unresolved_integration_tile_error(
-            extension_id,
-            integration_id,
-            integration_tile_id,
-        ));
-    }
-
-    legacy_tool_integration_tile(launch.tool_id.as_deref(), None)
-        .map(Some)
-        .ok_or_else(|| "unsupported integration tile".to_string())
-}
-
-fn unresolved_integration_tile_error(
-    extension_id: &str,
-    integration_id: &str,
-    integration_tile_id: &str,
-) -> String {
-    format!(
-        "Integration Tile unavailable. Fluidity could not find `{}:{}.{}` for this Workspace. Restore the Extension Definition or run Reload Extensions after fixing it.",
-        extension_id, integration_id, integration_tile_id
-    )
-}
-
-fn terminal_launch_plan_for_resolved_tool(
-    launch: &TerminalLaunchRequest,
-    tool_tile: Option<&ToolIntegrationTile>,
-) -> Result<TerminalLaunchPlan, String> {
-    let Some(tool_tile) = tool_tile else {
-        return Ok(TerminalLaunchPlan {
-            shell_command: None,
-            assigned_resume: None,
-        });
+    workspace_id: Option<&str>,
+) -> Result<PathBuf, String> {
+    let Some(workspace_id) = workspace_id else {
+        return env::current_dir().map_err(|error| error.to_string());
     };
 
-    let existing_resume = launch
-        .resume
-        .clone()
-        .and_then(|resume| sanitize_resume_metadata(Some(resume)));
+    let app_state = workspace_state.app_state.lock().map_err(lock_error)?;
+    let workspace = app_state
+        .open_workspaces
+        .iter()
+        .find(|workspace| workspace.id == workspace_id)
+        .ok_or_else(|| "workspace is not open".to_string())?;
 
-    match &tool_tile.resume {
-        ToolResumeStrategy::CoreProvider { provider } => {
-            if let Some(resume) = existing_resume.filter(|resume| resume.provider == *provider) {
-                return Ok(TerminalLaunchPlan {
-                    shell_command: Some(resume_tool_shell_command(provider, &resume)),
-                    assigned_resume: None,
-                });
-            }
-
-            if launch.resume.is_none() {
-                if let Some(resume) = new_preassigned_resume(provider) {
-                    return Ok(TerminalLaunchPlan {
-                        shell_command: Some(new_tool_shell_command(provider, &resume)),
-                        assigned_resume: Some(resume),
-                    });
-                }
-            }
-        }
-        ToolResumeStrategy::None => {}
-        ToolResumeStrategy::SessionIdArg { provider, arg } => {
-            if let Some(resume) = existing_resume.filter(|resume| resume.provider == *provider) {
-                let mut args = tool_tile.command_argv.clone();
-                args.push(arg.clone());
-                args.push(resume.identifier);
-                return Ok(TerminalLaunchPlan {
-                    shell_command: Some(shell_command_from_args(args)),
-                    assigned_resume: None,
-                });
-            }
-
-            if launch.resume.is_none() {
-                let resume = TileResumeMetadata {
-                    provider: provider.clone(),
-                    identifier: Uuid::new_v4().to_string(),
-                };
-                let mut args = tool_tile.command_argv.clone();
-                args.push(arg.clone());
-                args.push(resume.identifier.clone());
-                return Ok(TerminalLaunchPlan {
-                    shell_command: Some(shell_command_from_args(args)),
-                    assigned_resume: Some(resume),
-                });
-            }
-        }
-    }
-
-    Ok(TerminalLaunchPlan {
-        shell_command: Some(shell_command_from_args(tool_tile.command_argv.clone())),
-        assigned_resume: None,
-    })
-}
-
-fn new_preassigned_resume(tool_id: &str) -> Option<TileResumeMetadata> {
-    if !matches!(tool_id, "claude" | "gemini" | "pi") {
-        return None;
-    }
-
-    Some(TileResumeMetadata {
-        provider: tool_id.to_string(),
-        identifier: Uuid::new_v4().to_string(),
-    })
-}
-
-fn new_tool_shell_command(tool_id: &str, resume: &TileResumeMetadata) -> String {
-    let mut args = vec![tool_id.to_string()];
-
-    match tool_id {
-        "claude" | "gemini" | "pi" => {
-            args.push("--session-id".to_string());
-            args.push(resume.identifier.clone());
-        }
-        _ => {}
-    }
-
-    shell_command_from_args(args)
-}
-
-fn resume_tool_shell_command(tool_id: &str, resume: &TileResumeMetadata) -> String {
-    let mut args = vec![tool_id.to_string()];
-
-    match tool_id {
-        "claude" | "gemini" => {
-            args.push("--resume".to_string());
-            args.push(resume.identifier.clone());
-        }
-        "codex" => {
-            args.push("resume".to_string());
-            args.push(resume.identifier.clone());
-        }
-        "opencode" | "pi" => {
-            args.push("--session".to_string());
-            args.push(resume.identifier.clone());
-        }
-        _ => {}
-    }
-
-    shell_command_from_args(args)
-}
-
-fn shell_command_from_args(args: Vec<String>) -> String {
-    args.iter()
-        .map(|arg| shell_escape_arg(arg))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn shell_escape_arg(arg: &str) -> String {
-    format!("'{}'", arg.replace('\'', "'\\''"))
+    PathBuf::from(&workspace.root)
+        .canonicalize()
+        .map_err(|error| error.to_string())
 }
 
 fn normalize_cwd(
@@ -3743,11 +2740,13 @@ mod tests {
             },
         };
 
-        let availability = tool_availability_for_tile("/bin/sh", &tile);
+        let developer_environment = DeveloperEnvironment::with_shell("/bin/sh");
+        let cwd = env::current_dir().unwrap();
+        let availability = tool_availability_for_tile(&developer_environment, &cwd, &tile);
 
         assert_eq!(availability.status, ToolAvailabilityStatus::Unavailable);
         assert!(availability.resolved_path.is_none());
-        assert!(ensure_tool_available("/bin/sh", &tile).is_err());
+        assert!(ensure_tool_available(&developer_environment, &cwd, &tile).is_err());
     }
 
     #[test]
@@ -3789,11 +2788,242 @@ mod tests {
             generated_workspace_branch_names: Vec::new(),
         };
 
-        let removed = remove_workspaces_from_state(&mut app_state, &["workspace-b".to_string()]);
+        let removed = workspace_removal::remove_workspaces_from_state(
+            &mut app_state,
+            &["workspace-b".to_string()],
+        );
 
         assert_eq!(removed, 1);
         assert_eq!(app_state.workspace_stack, vec!["workspace-a"]);
         assert_eq!(app_state.open_workspaces.len(), 1);
+    }
+
+    #[test]
+    fn workspace_discard_dirty_confirmation_short_circuits() {
+        let (temp_dir, app_data_dir, project, workspace) =
+            test_git_project_with_workspace("fluidity-discard-dirty", ProjectSettings::default());
+        fs::write(Path::new(&workspace.root).join("dirty.txt"), "dirty\n").unwrap();
+        let mut app_state = test_app_state_with_stack(
+            vec![project],
+            vec![workspace.clone()],
+            vec![workspace.id.clone()],
+        );
+
+        let result = workspace_removal::workspace_discard(
+            &mut app_state,
+            &app_data_dir,
+            &TerminalState::default(),
+            &workspace.id,
+            false,
+        )
+        .unwrap();
+
+        match result {
+            workspace_removal::WorkspaceDiscardResult::Dirty { dirty_confirmation } => {
+                assert_eq!(dirty_confirmation.dirty_workspace_count, 1);
+                assert!(dirty_confirmation
+                    .sample_paths
+                    .contains(&"dirty.txt".to_string()));
+            }
+            workspace_removal::WorkspaceDiscardResult::Discarded { .. } => {
+                panic!("dirty Workspace should require confirmation")
+            }
+        }
+        assert_eq!(app_state.open_workspaces.len(), 1);
+        assert_eq!(app_state.workspace_stack, vec![workspace.id]);
+        assert!(Path::new(&workspace.root).is_dir());
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn workspace_discard_removes_state_stack_and_root() {
+        let (temp_dir, app_data_dir, project, workspace) =
+            test_git_project_with_workspace("fluidity-discard-clean", ProjectSettings::default());
+        let mut app_state = test_app_state_with_stack(
+            vec![project],
+            vec![workspace.clone()],
+            vec![workspace.id.clone()],
+        );
+
+        let result = workspace_removal::workspace_discard(
+            &mut app_state,
+            &app_data_dir,
+            &TerminalState::default(),
+            &workspace.id,
+            false,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            result,
+            workspace_removal::WorkspaceDiscardResult::Discarded { .. }
+        ));
+        assert!(app_state.open_workspaces.is_empty());
+        assert!(app_state.workspace_stack.is_empty());
+        assert!(!Path::new(&workspace.root).exists());
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn project_disconnect_removes_all_project_workspaces() {
+        let temp_dir = test_temp_dir("fluidity-project-disconnect");
+        let app_data_dir = temp_dir.join("app-data");
+        let project_root = temp_dir.join("project");
+        setup_git_project_root(&project_root);
+        fs::create_dir_all(&app_data_dir).unwrap();
+        let project =
+            test_registered_project("project-1", &project_root, ProjectSettings::default());
+        let other_project_root = temp_dir.join("other-project");
+        fs::create_dir_all(&other_project_root).unwrap();
+        let other_project = RegisteredProject {
+            id: "project-2".to_string(),
+            name: "Other".to_string(),
+            root: path_to_string(&other_project_root),
+            kind: ProjectKind::Plain,
+            settings: ProjectSettings::default(),
+        };
+        let other_workspace = OpenWorkspace {
+            id: "workspace-other".to_string(),
+            project_id: other_project.id.clone(),
+            name: "Other".to_string(),
+            root: other_project.root.clone(),
+            git_branch: None,
+            tile_state: default_workspace_tile_state(),
+            last_used_at: 0,
+        };
+        let mut app_state = PersistedAppState::default();
+        let mut warnings = Vec::new();
+        let workspace_a =
+            create_git_workspace(&app_data_dir, &mut app_state, &project, &mut warnings).unwrap();
+        let workspace_b =
+            create_git_workspace(&app_data_dir, &mut app_state, &project, &mut warnings).unwrap();
+        app_state.projects = vec![project.clone(), other_project.clone()];
+        app_state.open_workspaces = vec![
+            workspace_a.clone(),
+            other_workspace.clone(),
+            workspace_b.clone(),
+        ];
+        app_state.workspace_stack = vec![
+            workspace_b.id.clone(),
+            other_workspace.id.clone(),
+            workspace_a.id.clone(),
+        ];
+
+        let result = workspace_removal::project_disconnect(
+            &mut app_state,
+            &app_data_dir,
+            &TerminalState::default(),
+            &project.id,
+            false,
+        )
+        .unwrap();
+
+        match result {
+            workspace_removal::ProjectDisconnectResult::Disconnected {
+                removed_workspace_count,
+                ..
+            } => assert_eq!(removed_workspace_count, 2),
+            workspace_removal::ProjectDisconnectResult::Dirty { .. } => {
+                panic!("clean Project Disconnect should not require confirmation")
+            }
+        }
+        assert_eq!(app_state.projects.len(), 1);
+        assert_eq!(app_state.projects[0].id.as_str(), other_project.id.as_str());
+        assert_eq!(app_state.open_workspaces.len(), 1);
+        assert_eq!(
+            app_state.open_workspaces[0].id.as_str(),
+            other_workspace.id.as_str()
+        );
+        assert_eq!(app_state.workspace_stack, vec![other_workspace.id.clone()]);
+        assert!(!Path::new(&workspace_a.root).exists());
+        assert!(!Path::new(&workspace_b.root).exists());
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn application_reset_clears_app_state_and_managed_roots() {
+        let (temp_dir, app_data_dir, project, workspace) =
+            test_git_project_with_workspace("fluidity-app-reset", ProjectSettings::default());
+        let mut app_state = test_app_state_with_stack(
+            vec![project],
+            vec![workspace.clone()],
+            vec![workspace.id.clone()],
+        );
+        app_state.settings.debug_layout = true;
+
+        let result = workspace_removal::application_reset(
+            &mut app_state,
+            &app_data_dir,
+            &TerminalState::default(),
+            false,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            result,
+            workspace_removal::ApplicationResetResult::Reset { .. }
+        ));
+        assert_eq!(app_state.projects.len(), 0);
+        assert_eq!(app_state.open_workspaces.len(), 0);
+        assert!(app_state.workspace_stack.is_empty());
+        assert!(!app_state.settings.debug_layout);
+        assert!(!Path::new(&workspace.root).exists());
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn workspace_branch_discard_policy_deletes_safe_branch_and_warns_when_kept() {
+        let temp_dir = test_temp_dir("fluidity-branch-policy");
+        let project_root = temp_dir.join("project");
+        setup_git_project_root(&project_root);
+        let project_root_string = path_to_string(&project_root);
+        let project = test_registered_project(
+            "project-1",
+            &project_root,
+            ProjectSettings {
+                delete_workspace_branch_on_discard: true,
+                ..ProjectSettings::default()
+            },
+        );
+
+        run_git_command(&project_root_string, &["branch", "safe"]).unwrap();
+        let mut warnings = Vec::new();
+        workspace_removal::delete_workspace_branch_after_discard(
+            &workspace_removal::WorkspaceCleanupTarget {
+                workspace: test_branch_workspace(&project, "safe"),
+                project: project.clone(),
+            },
+            &mut warnings,
+        );
+        assert!(warnings.is_empty());
+        assert!(!local_git_branch_names(&project_root_string)
+            .unwrap()
+            .contains("safe"));
+
+        run_git_command(&project_root_string, &["checkout", "-b", "unmerged"]).unwrap();
+        fs::write(project_root.join("unmerged.txt"), "unmerged\n").unwrap();
+        run_git_command(&project_root_string, &["add", "unmerged.txt"]).unwrap();
+        run_git_command(&project_root_string, &["commit", "-m", "unmerged"]).unwrap();
+        run_git_command(&project_root_string, &["checkout", "main"]).unwrap();
+        workspace_removal::delete_workspace_branch_after_discard(
+            &workspace_removal::WorkspaceCleanupTarget {
+                workspace: test_branch_workspace(&project, "unmerged"),
+                project: project.clone(),
+            },
+            &mut warnings,
+        );
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("Local branch unmerged was kept")));
+        assert!(local_git_branch_names(&project_root_string)
+            .unwrap()
+            .contains("unmerged"));
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 
     #[test]
@@ -4033,6 +3263,145 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_extension_identities_are_skipped() {
+        let temp_dir = test_temp_dir("fluidity-duplicate-extension");
+        let app_data_dir = temp_dir.join("app-data");
+        let project_root = temp_dir.join("project");
+        write_extension_manifest(
+            &app_data_dir.join("extensions").join("example.dupe"),
+            r#"{
+              "schemaVersion": 1,
+              "id": "example.dupe",
+              "title": "Global Duplicate",
+              "contributes": {
+                "integrations": [{
+                  "id": "agent",
+                  "title": "Agent",
+                  "tiles": [{
+                    "id": "cli",
+                    "kind": "tool",
+                    "title": "Global Agent",
+                    "command": { "argv": ["echo", "global"] }
+                  }]
+                }]
+              }
+            }"#,
+        );
+        write_extension_manifest(
+            &project_root
+                .join(".fluidity")
+                .join("extensions")
+                .join("example.dupe"),
+            r#"{
+              "schemaVersion": 1,
+              "id": "example.dupe",
+              "title": "Project Duplicate",
+              "contributes": {
+                "integrations": [{
+                  "id": "agent",
+                  "title": "Agent",
+                  "tiles": [{
+                    "id": "cli",
+                    "kind": "tool",
+                    "title": "Project Agent",
+                    "command": { "argv": ["echo", "project"] }
+                  }]
+                }]
+              }
+            }"#,
+        );
+        let state = test_workspace_state(
+            app_data_dir,
+            vec![RegisteredProject {
+                id: "project-1".to_string(),
+                name: "Project".to_string(),
+                root: project_root.to_string_lossy().to_string(),
+                kind: ProjectKind::Plain,
+                settings: ProjectSettings::default(),
+            }],
+            vec![OpenWorkspace {
+                id: "workspace-1".to_string(),
+                project_id: "project-1".to_string(),
+                name: "Project".to_string(),
+                root: project_root.to_string_lossy().to_string(),
+                git_branch: None,
+                tile_state: default_workspace_tile_state(),
+                last_used_at: 0,
+            }],
+        );
+
+        let snapshot = extension_catalog_for_workspace(&state, Some("workspace-1"));
+        let tiles = snapshot
+            .tiles
+            .iter()
+            .filter(|tile| tile.extension_id == "example.dupe")
+            .collect::<Vec<_>>();
+
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(tiles[0].command_argv, vec!["echo", "global"]);
+        assert!(snapshot.extensions.iter().any(|extension| {
+            extension.extension_id == "example.dupe" && extension.status == "skipped"
+        }));
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn duplicate_integration_tile_contributions_are_skipped() {
+        let app_data_dir = test_temp_dir("fluidity-duplicate-tile-contribution");
+        write_extension_manifest(
+            &app_data_dir.join("extensions").join("example.duplicates"),
+            r#"{
+              "schemaVersion": 1,
+              "id": "example.duplicates",
+              "title": "Duplicate Tiles",
+              "contributes": {
+                "integrations": [{
+                  "id": "agent",
+                  "title": "Agent",
+                  "tiles": [{
+                    "id": "cli",
+                    "kind": "tool",
+                    "title": "First Agent",
+                    "command": { "argv": ["echo", "first"] }
+                  }]
+                }, {
+                  "id": "agent",
+                  "title": "Agent Again",
+                  "tiles": [{
+                    "id": "cli",
+                    "kind": "tool",
+                    "title": "Second Agent",
+                    "command": { "argv": ["echo", "second"] }
+                  }]
+                }]
+              }
+            }"#,
+        );
+        let state = test_workspace_state(app_data_dir.clone(), Vec::new(), Vec::new());
+
+        let snapshot = extension_catalog_for_workspace(&state, None);
+        let tiles = snapshot
+            .tiles
+            .iter()
+            .filter(|tile| {
+                tile.extension_id == "example.duplicates"
+                    && tile.integration_id == "agent"
+                    && tile.integration_tile_id == "cli"
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(tiles[0].command_argv, vec!["echo", "first"]);
+        assert!(snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("Duplicate Integration Tile")));
+
+        let _ = fs::remove_dir_all(app_data_dir);
+    }
+
+    #[test]
     fn project_extensions_are_workspace_scoped_and_launch_configured_argv() {
         let temp_dir = test_temp_dir("fluidity-project-extension");
         let app_data_dir = temp_dir.join("app-data");
@@ -4118,6 +3487,94 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    fn test_git_project_with_workspace(
+        prefix: &str,
+        settings: ProjectSettings,
+    ) -> (PathBuf, PathBuf, RegisteredProject, OpenWorkspace) {
+        let temp_dir = test_temp_dir(prefix);
+        let app_data_dir = temp_dir.join("app-data");
+        let project_root = temp_dir.join("project");
+        setup_git_project_root(&project_root);
+        fs::create_dir_all(&app_data_dir).unwrap();
+
+        let project = test_registered_project("project-1", &project_root, settings);
+        let mut app_state = PersistedAppState::default();
+        let mut warnings = Vec::new();
+        let workspace =
+            create_git_workspace(&app_data_dir, &mut app_state, &project, &mut warnings).unwrap();
+
+        (temp_dir, app_data_dir, project, workspace)
+    }
+
+    fn setup_git_project_root(project_root: &Path) {
+        fs::create_dir_all(project_root).unwrap();
+        test_command(project_root, &["git", "init"]);
+        let project_root_string = path_to_string(project_root);
+        run_git_command(
+            &project_root_string,
+            &["config", "user.email", "test@example.com"],
+        )
+        .unwrap();
+        run_git_command(&project_root_string, &["config", "user.name", "Test User"]).unwrap();
+        fs::write(project_root.join("README.md"), "tracked\n").unwrap();
+        run_git_command(&project_root_string, &["add", "README.md"]).unwrap();
+        run_git_command(&project_root_string, &["commit", "-m", "initial"]).unwrap();
+        run_git_command(&project_root_string, &["branch", "-M", "main"]).unwrap();
+        run_git_command(
+            &project_root_string,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        )
+        .unwrap();
+        run_git_command(
+            &project_root_string,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        )
+        .unwrap();
+    }
+
+    fn test_registered_project(
+        id: &str,
+        project_root: &Path,
+        settings: ProjectSettings,
+    ) -> RegisteredProject {
+        RegisteredProject {
+            id: id.to_string(),
+            name: "Project".to_string(),
+            root: path_to_string(project_root),
+            kind: ProjectKind::Git,
+            settings,
+        }
+    }
+
+    fn test_app_state_with_stack(
+        projects: Vec<RegisteredProject>,
+        open_workspaces: Vec<OpenWorkspace>,
+        workspace_stack: Vec<String>,
+    ) -> PersistedAppState {
+        PersistedAppState {
+            projects,
+            open_workspaces,
+            workspace_stack,
+            ..PersistedAppState::default()
+        }
+    }
+
+    fn test_branch_workspace(project: &RegisteredProject, branch: &str) -> OpenWorkspace {
+        OpenWorkspace {
+            id: format!("workspace-{branch}"),
+            project_id: project.id.clone(),
+            name: branch.to_string(),
+            root: project.root.clone(),
+            git_branch: Some(branch.to_string()),
+            tile_state: default_workspace_tile_state(),
+            last_used_at: 0,
+        }
     }
 
     fn resume(provider: &str, identifier: &str) -> TileResumeMetadata {

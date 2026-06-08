@@ -2,7 +2,7 @@
 
 Status: research direction for a future version. This document does not commit Fluidity to supporting executable Extension modules in v1.
 
-Fluidity v1 starts with manifest-only Extension Definitions in `fluidity.extension.json`. Executable Extension modules are still a plausible future path, but they should add runtime behavior behind the same Extension identity, contribution registry, discovery, and reload model rather than replacing the declaration layer.
+Fluidity v1 starts with manifest-only Extension Definitions in `fluidity.extension.json`. Executable Extension modules are still a plausible future path, but they should add runtime behavior behind the same Extension identity, contribution registry, discovery, and reload model rather than replacing the declaration layer. Active Extension Point scenarios such as scheduled automation and voice command control are researched separately in [Active Extension Points](active-extension-points.md).
 
 ## Summary recommendation
 
@@ -57,7 +57,7 @@ Manifest-only Extension Points should remain the default whenever Fluidity Core 
 | Themes/icons/static assets | Assets are static files referenced by the Extension Definition. | Assets are generated, remote, or depend on runtime state. |
 | Git/issue/PR integrations | A built-in Fluidity adapter can be configured declaratively. | The integration talks to a new service, implements auth, polls/webhooks, computes PR review state, or provides custom issue queries. |
 | Browser/workflow automation | The action is a static URL/template opened by Fluidity. | The Extension drives browser state, automates forms, injects scripts, or coordinates with external services. |
-| Agent/workspace hooks | The hook can be expressed as a built-in policy option. | The Extension reacts to lifecycle events, inspects edits, gates actions, launches subagents, or injects context. |
+| Agent/Workspace lifecycle contributions | The lifecycle behavior can be expressed as a built-in policy option. | The Extension reacts to lifecycle events, inspects edits, gates actions, launches subagents, or injects context. |
 
 A useful rule: if Fluidity Core can fully validate, preview, and execute the behavior from data, keep it manifest-only. If user-authored code must make decisions at runtime, require an executable module and the corresponding trust flow.
 
@@ -97,7 +97,7 @@ Executable Extensions should declare capabilities in `fluidity.extension.json`. 
 - `workspaceState` mutations such as creating, moving, or closing Tiles;
 - `background` for watchers, timers, polling, or long-running work;
 - `ui.prompt` for interactive prompts and notifications;
-- `agent` capabilities if future agent hooks can steer or launch agents.
+- `agent` capabilities if future agent lifecycle contributions can steer or launch agents.
 
 Permissions should be deny-by-default for executable modules. Fluidity should show permission prompts in product language, not API names, and include provenance: Global or Project source, Extension Identity, manifest path, entrypoint, and version/hash.
 

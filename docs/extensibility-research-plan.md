@@ -128,3 +128,25 @@ Documented in [Executable Extension Modules Research](executable-extension-modul
 - [x] Propose a permission/trust model for Global Extensions and Project Extensions.
 - [x] Propose reload/lifecycle semantics for executable modules.
 - [x] Document how executable modules would coexist with `fluidity.extension.json` rather than replacing it.
+
+## 8. Research active Extension Points for automation and voice control
+
+**Type:** HITL  
+**Blocked by:** Issue 24
+
+### What to build
+
+Research the future Active Extension Points needed for executable Fluidity Extensions, using scheduled automation, agent-driven Workspace Composition, and voice-command control as tracer examples. Voice is treated as one alternate input provider rather than a core product pillar.
+
+### Acceptance criteria
+
+Documented in [Active Extension Points](active-extension-points.md) and ADR [0009](adr/0009-active-extension-points-use-declared-executable-modules.md).
+
+- [x] Identify which Active Extension Points require executable Extension modules versus manifest-only Extension Definitions.
+- [x] Use scheduled automation, agent-driven Workspace Composition, and voice command control as concrete scenarios.
+- [x] Define candidate Extension Points such as contributed Commands, Command handlers, schedules, alternate input providers, Workspace lifecycle contributions, Workspace Composition actions, and file actions.
+- [x] Propose a permission/trust model for Global Extensions and Project Extensions.
+- [x] Propose lifecycle and reload semantics for Active Extensions, including what happens to running tasks during Extension Reload.
+- [x] Describe how Active Extension Points coexist with `fluidity.extension.json` and the existing contribution registry.
+- [x] Document safety boundaries for Project-scoped automation so Project Extensions do not globally affect unrelated Registered Projects.
+- [x] Update the extensibility docs/ADR trail with the agreed terminology and decisions.

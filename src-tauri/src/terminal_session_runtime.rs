@@ -29,6 +29,7 @@ pub(crate) struct TerminalSessionCreateRequest {
     pub(crate) tile_id: String,
     pub(crate) cwd: PathBuf,
     pub(crate) shell: String,
+    pub(crate) environment: HashMap<String, String>,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
     pub(crate) shell_command: Option<String>,
@@ -96,6 +97,9 @@ impl TerminalState {
             cwd.clone(),
             request.shell_command.as_deref(),
         );
+        for (key, value) in request.environment {
+            command.env(key, value);
+        }
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         command.env("FLUIDITY_TILE_ID", &request.tile_id);
@@ -239,6 +243,8 @@ fn terminal_command(shell: &str, cwd: PathBuf, shell_command: Option<&str>) -> C
     if let Some(shell_command) = shell_command {
         command.arg("-lc");
         command.arg(shell_command);
+    } else {
+        command.arg("-l");
     }
 
     command
