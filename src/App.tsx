@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { CodeEditorTile } from "./CodeEditorTile";
 import { commandIdForKeyboardEvent, createCommands, type AppCommandApi } from "./commands";
 import { KeyCap } from "./KeyCap";
 import { Picker, type PickerItem } from "./Picker";
@@ -126,6 +127,7 @@ function UnavailableIntegrationTile({ tile }: { tile: Tile }) {
 function tileOptionsForCatalogItem(catalogItem: TilePickerCatalogItem):
   | { kind: "terminal"; title: string }
   | { kind: "workspace"; title: string }
+  | { kind: "code"; title: string }
   | {
       kind: "tool";
       title: string;
@@ -145,6 +147,10 @@ function tileOptionsForCatalogItem(catalogItem: TilePickerCatalogItem):
 
   if (catalogItem.kind === "workspace") {
     return { kind: "workspace", title: catalogItem.title };
+  }
+
+  if (catalogItem.kind === "code") {
+    return { kind: "code", title: catalogItem.title };
   }
 
   return { kind: "terminal", title: catalogItem.title };
@@ -818,6 +824,7 @@ export function App() {
     tileOptions:
       | { kind: "terminal"; title: string }
       | { kind: "workspace"; title: string }
+      | { kind: "code"; title: string }
       | {
           kind: "tool";
           title: string;
@@ -1012,6 +1019,8 @@ export function App() {
                         onSwitchWorkspace={runSwitchWorkspace}
                         onDiscardWorkspace={runDiscardWorkspace}
                       />
+                    ) : tile.kind === "code" ? (
+                      <CodeEditorTile active={focused} workspaceId={currentWorkspaceId ?? ""} />
                     ) : tile.kind === "tool" && !integrationCatalogLoaded ? (
                       <div className="tile-placeholder">Loading Integration Tile…</div>
                     ) : tile.kind === "tool" &&

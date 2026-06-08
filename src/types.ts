@@ -6,7 +6,7 @@ export const DEFAULT_WORKSPACE_TILE_WIDTH = 3;
 
 export type Direction = "left" | "down" | "up" | "right";
 
-export type TileKind = "terminal" | "tool" | "workspace";
+export type TileKind = "terminal" | "tool" | "workspace" | "code";
 
 export interface TileResumeMetadata {
   provider: string;
@@ -39,7 +39,15 @@ export interface WorkspaceStackTile extends BaseTile {
   kind: "workspace";
 }
 
-export type Tile = TerminalWorkspaceTile | ToolWorkspaceTile | WorkspaceStackTile;
+export interface CodeEditorWorkspaceTile extends BaseTile {
+  kind: "code";
+}
+
+export type Tile =
+  | TerminalWorkspaceTile
+  | ToolWorkspaceTile
+  | WorkspaceStackTile
+  | CodeEditorWorkspaceTile;
 
 export type ProjectKind = "git" | "plain";
 
@@ -176,6 +184,29 @@ export interface ApplicationResetResponse {
 export interface WorkspaceTileStateSaveRequest {
   workspaceId: string;
   tileState: WorkspaceTileState;
+}
+
+export interface CodeFileReadRequest {
+  workspaceId: string;
+  path: string;
+}
+
+export interface CodeFileReadResponse {
+  path: string;
+  contents: string;
+  version: string;
+}
+
+export interface CodeFileWriteRequest {
+  workspaceId: string;
+  path: string;
+  contents: string;
+  expectedVersion?: string | null;
+}
+
+export interface CodeFileWriteResponse {
+  path: string;
+  version: string;
 }
 
 export type TerminalLaunch =

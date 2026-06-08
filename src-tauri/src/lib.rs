@@ -58,6 +58,7 @@ const GRID_ROWS: i32 = 8;
 const GRID_MIN_TILE_WIDTH: i32 = 1;
 const GRID_MIN_TILE_HEIGHT: i32 = 1;
 const DEFAULT_WORKSPACE_TILE_WIDTH: i32 = 3;
+const CODE_FILE_SIZE_LIMIT_BYTES: u64 = 2 * 1024 * 1024;
 
 struct WorkspaceState {
     state_path: PathBuf,
@@ -217,6 +218,37 @@ struct TileResumeMetadata {
 struct WorkspaceTileStateSaveRequest {
     workspace_id: String,
     tile_state: WorkspaceTileState,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeFileReadRequest {
+    workspace_id: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeFileReadResponse {
+    path: String,
+    contents: String,
+    version: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeFileWriteRequest {
+    workspace_id: String,
+    path: String,
+    contents: String,
+    expected_version: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeFileWriteResponse {
+    path: String,
+    version: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -773,6 +805,68 @@ fn workspace_tile_state_save(
 }
 
 #[tauri::command]
+fn code_file_read(
+    state: State<'_, WorkspaceState>,
+    request: CodeFileReadRequest,
+) -> Result<CodeFileReadResponse, String> {
+    let target = workspace_file_path(&state, &request.workspace_id, &request.path, true)?;
+    let metadata = fs::metadata(&target).map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("code file path is not a file".to_string());
+    }
+    if metadata.len() > CODE_FILE_SIZE_LIMIT_BYTES {
+        return Err(format!(
+            "code file is larger than {} bytes",
+            CODE_FILE_SIZE_LIMIT_BYTES
+        ));
+    }
+
+    let contents = fs::read_to_string(&target)
+        .map_err(|error| format!("code file must be readable UTF-8 text: {error}"))?;
+
+    Ok(CodeFileReadResponse {
+        path: request.path,
+        contents,
+        version: file_version(&metadata)?,
+    })
+}
+
+#[tauri::command]
+fn code_file_write(
+    state: State<'_, WorkspaceState>,
+    request: CodeFileWriteRequest,
+) -> Result<CodeFileWriteResponse, String> {
+    if request.contents.len() as u64 > CODE_FILE_SIZE_LIMIT_BYTES {
+        return Err(format!(
+            "code file contents are larger than {} bytes",
+            CODE_FILE_SIZE_LIMIT_BYTES
+        ));
+    }
+
+    let target = workspace_file_path(&state, &request.workspace_id, &request.path, false)?;
+    if target.exists() {
+        let metadata = fs::metadata(&target).map_err(|error| error.to_string())?;
+        if !metadata.is_file() {
+            return Err("code file path is not a file".to_string());
+        }
+        if let Some(expected_version) = &request.expected_version {
+            let current_version = file_version(&metadata)?;
+            if expected_version != &current_version {
+                return Err("code file changed on disk; reopen before saving".to_string());
+            }
+        }
+    }
+
+    fs::write(&target, request.contents).map_err(|error| error.to_string())?;
+    let metadata = fs::metadata(&target).map_err(|error| error.to_string())?;
+
+    Ok(CodeFileWriteResponse {
+        path: request.path,
+        version: file_version(&metadata)?,
+    })
+}
+
+#[tauri::command]
 fn application_reset(
     workspace_state: State<'_, WorkspaceState>,
     terminal_state: State<'_, TerminalState>,
@@ -923,6 +1017,8 @@ pub fn run() {
             project_remove,
             workspace_create,
             workspace_tile_state_save,
+            code_file_read,
+            code_file_write,
             application_reset,
             terminal_create,
             terminal_write,
@@ -1547,6 +1643,18 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
             tile.resume = None;
             if tile.title.trim().is_empty() {
                 tile.title = "Workspaces".to_string();
+            }
+            tiles.push(tile);
+            continue;
+        }
+
+        if tile.kind == "code" {
+            tile.extension_id = None;
+            tile.integration_id = None;
+            tile.integration_tile_id = None;
+            tile.resume = None;
+            if tile.title.trim().is_empty() {
+                tile.title = "Code Editor".to_string();
             }
             tiles.push(tile);
             continue;
@@ -2477,6 +2585,71 @@ fn workspace_cwd_for_optional_id(
         .map_err(|error| error.to_string())
 }
 
+fn workspace_file_path(
+    workspace_state: &WorkspaceState,
+    workspace_id: &str,
+    relative_path: &str,
+    must_exist: bool,
+) -> Result<PathBuf, String> {
+    if relative_path.trim().is_empty() {
+        return Err("code file path is required".to_string());
+    }
+
+    let path = Path::new(relative_path);
+    if path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err("code file path must be relative and stay inside the workspace".to_string());
+    }
+
+    let app_state = workspace_state.app_state.lock().map_err(lock_error)?;
+    let workspace = app_state
+        .open_workspaces
+        .iter()
+        .find(|workspace| workspace.id == workspace_id)
+        .ok_or_else(|| "workspace is not open".to_string())?;
+    let workspace_root = PathBuf::from(&workspace.root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let candidate = workspace_root.join(path);
+    let canonical_candidate = if must_exist {
+        candidate
+            .canonicalize()
+            .map_err(|error| error.to_string())?
+    } else if let Some(parent) = candidate.parent() {
+        let canonical_parent = parent.canonicalize().map_err(|error| error.to_string())?;
+        canonical_parent.join(
+            candidate
+                .file_name()
+                .ok_or_else(|| "code file path is invalid".to_string())?,
+        )
+    } else {
+        return Err("code file path is invalid".to_string());
+    };
+
+    if !canonical_candidate.starts_with(&workspace_root) {
+        return Err("code file path must stay inside the workspace".to_string());
+    }
+
+    Ok(canonical_candidate)
+}
+
+fn file_version(metadata: &fs::Metadata) -> Result<String, String> {
+    let modified = metadata.modified().map_err(|error| error.to_string())?;
+    let nanos = modified
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_nanos();
+    Ok(format!("{nanos}:{}", metadata.len()))
+}
+
 fn normalize_cwd(
     workspace_state: &WorkspaceState,
     workspace_id: &str,
@@ -3148,6 +3321,77 @@ mod tests {
         assert!(sanitized.tiles[0].integration_id.is_none());
         assert!(sanitized.tiles[0].integration_tile_id.is_none());
         assert!(sanitized.tiles[0].resume.is_none());
+    }
+
+    #[test]
+    fn sanitize_tile_state_accepts_code_tiles() {
+        let mut tile = tile_with_initial_command("claude");
+        tile.kind = "code".to_string();
+        tile.title = "".to_string();
+        tile.extension_id = Some(CORE_EXTENSION_ID.to_string());
+        tile.integration_id = Some("claude".to_string());
+        tile.integration_tile_id = Some("cli".to_string());
+        tile.resume = Some(resume("claude", "session-1"));
+        let tile_state = WorkspaceTileState { tiles: vec![tile] };
+
+        let sanitized = sanitize_tile_state(tile_state);
+
+        assert_eq!(sanitized.tiles.len(), 1);
+        assert_eq!(sanitized.tiles[0].kind, "code");
+        assert_eq!(sanitized.tiles[0].title, "Code Editor");
+        assert!(sanitized.tiles[0].extension_id.is_none());
+        assert!(sanitized.tiles[0].integration_id.is_none());
+        assert!(sanitized.tiles[0].integration_tile_id.is_none());
+        assert!(sanitized.tiles[0].resume.is_none());
+    }
+
+    #[test]
+    fn workspace_file_path_stays_inside_workspace() {
+        let temp_dir = test_temp_dir("fluidity-code-file-path");
+        let app_data_dir = temp_dir.join("app-data");
+        let project_root = temp_dir.join("project");
+        fs::create_dir_all(project_root.join("src")).unwrap();
+        fs::create_dir_all(&app_data_dir).unwrap();
+        fs::write(project_root.join("src").join("main.ts"), "main\n").unwrap();
+        fs::write(temp_dir.join("outside.ts"), "outside\n").unwrap();
+
+        let project =
+            test_registered_project("project-1", &project_root, ProjectSettings::default());
+        let state = test_workspace_state(
+            app_data_dir,
+            vec![project.clone()],
+            vec![OpenWorkspace {
+                id: "workspace-1".to_string(),
+                project_id: project.id,
+                name: "Home".to_string(),
+                root: path_to_string(&project_root),
+                git_branch: None,
+                tile_state: default_workspace_tile_state(),
+                last_used_at: 0,
+            }],
+        );
+
+        let inside = workspace_file_path(&state, "workspace-1", "src/main.ts", true).unwrap();
+        assert_eq!(
+            inside,
+            project_root
+                .join("src")
+                .join("main.ts")
+                .canonicalize()
+                .unwrap()
+        );
+        assert!(workspace_file_path(&state, "workspace-1", "src/new.ts", false).is_ok());
+        assert!(workspace_file_path(&state, "workspace-1", "../outside.ts", true).is_err());
+        assert!(workspace_file_path(
+            &state,
+            "workspace-1",
+            &path_to_string(&temp_dir.join("outside.ts")),
+            true,
+        )
+        .is_err());
+        assert!(workspace_file_path(&state, "workspace-1", "missing-dir/new.ts", false).is_err());
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 
     #[test]

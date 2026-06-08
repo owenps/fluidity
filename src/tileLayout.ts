@@ -427,6 +427,7 @@ export type TileSplitDirection = Extract<Direction, "right" | "down">;
 type NewTileOptions =
   | { kind: "terminal"; title: string }
   | { kind: "workspace"; title: string }
+  | { kind: "code"; title: string }
   | {
       kind: "tool";
       title: string;
@@ -512,6 +513,10 @@ function createTileFromOptions(
     return { ...base, kind: "workspace" };
   }
 
+  if (options.kind === "code") {
+    return { ...base, kind: "code" };
+  }
+
   return { ...base, kind: "terminal" };
 }
 
@@ -528,6 +533,10 @@ function tileOptionsForClone(tile: Tile): NewTileOptions {
 
   if (tile.kind === "workspace") {
     return { kind: "workspace", title: tile.title };
+  }
+
+  if (tile.kind === "code") {
+    return { kind: "code", title: tile.title };
   }
 
   return { kind: "terminal", title: tile.title };

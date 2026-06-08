@@ -21,6 +21,12 @@ export type TilePickerCatalogItem =
     }
   | {
       id: string;
+      kind: "code";
+      title: string;
+      icon: ReactNode;
+    }
+  | {
+      id: string;
       kind: "tool";
       title: string;
       icon: ReactNode;
@@ -63,8 +69,17 @@ const workspaceTilePickerItem = {
   defaultVisible: true,
 } as const satisfies ConfigurableTilePickerCatalogItem;
 
+const codeEditorTilePickerItem = {
+  id: "code",
+  kind: "code",
+  title: "Code Editor",
+  icon: <span className="code-editor-picker-icon" />,
+  defaultVisible: true,
+} as const satisfies ConfigurableTilePickerCatalogItem;
+
 export const defaultConfigurableTilePickerItems: ConfigurableTilePickerCatalogItem[] = [
   workspaceTilePickerItem,
+  codeEditorTilePickerItem,
   terminalTilePickerItem,
 ];
 
@@ -85,7 +100,12 @@ export function createConfigurableTilePickerItems(
     defaultVisible: tile.defaultVisible,
   }));
 
-  return [workspaceTilePickerItem, ...integrationTilePickerItems, terminalTilePickerItem];
+  return [
+    workspaceTilePickerItem,
+    codeEditorTilePickerItem,
+    ...integrationTilePickerItems,
+    terminalTilePickerItem,
+  ];
 }
 
 export function createDefaultTilePickerVisibility(
@@ -116,6 +136,7 @@ export function findTilePickerItemForTile(
 ): TilePickerCatalogItem {
   if (tile.kind === "terminal") return terminalTilePickerItem;
   if (tile.kind === "workspace") return workspaceTilePickerItem;
+  if (tile.kind === "code") return codeEditorTilePickerItem;
 
   return (
     items.find(
