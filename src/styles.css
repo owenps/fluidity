@@ -383,9 +383,8 @@ body {
 }
 
 .tile-focused.tile-layout-mutation-preview {
-  padding: 2px;
-  border-color: transparent;
-  border-width: 2px;
+  padding: 4px;
+  border-width: 0;
   box-shadow: none;
 }
 
