@@ -200,8 +200,9 @@ function isPreviewablePath(path: string | undefined) {
   return isMarkdownPath(path) || isHtmlPath(path);
 }
 
-function previewToggleTooltip(previewOpen: boolean) {
-  return `${previewOpen ? "Show source" : "Show preview"} · ${previewShortcutLabel}`;
+function previewToggleTooltip(previewOpen: boolean, showShortcut: boolean) {
+  const label = previewOpen ? "Show source" : "Show preview";
+  return showShortcut ? `${label} · ${previewShortcutLabel}` : label;
 }
 
 function languageIdForPath(path: string) {
@@ -340,6 +341,7 @@ export function CodeEditorTile({
   const [, setRevision] = useState(0);
   const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
   const [previewVisible, setPreviewVisible] = useState(false);
+  const [editorFocused, setEditorFocused] = useState(false);
 
   const rerender = () => setRevision((revision) => revision + 1);
   const toast = (severity: ToastSeverity, title: string, detail?: string) => {
@@ -549,6 +551,7 @@ export function CodeEditorTile({
 
   useEffect(() => {
     activeRef.current = active;
+    if (!active) setEditorFocused(false);
   }, [active]);
 
   useEffect(() => {
@@ -645,7 +648,11 @@ export function CodeEditorTile({
       rerender();
       if (settingsRef.current.autoSave === "afterDelay") scheduleAutoSave();
     });
+    const focusDisposable = editor.onDidFocusEditorWidget(() => {
+      setEditorFocused(true);
+    });
     const blurDisposable = editor.onDidBlurEditorWidget(() => {
+      setEditorFocused(false);
       saveActiveViewState();
       publishState();
       if (settingsRef.current.autoSave === "onFocusChange" && activeTab()) {
@@ -667,6 +674,7 @@ export function CodeEditorTile({
     return () => {
       if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current);
       contentDisposable.dispose();
+      focusDisposable.dispose();
       blurDisposable.dispose();
       cursorDisposable.dispose();
       saveDisposable.dispose();
@@ -843,6 +851,7 @@ export function CodeEditorTile({
   const htmlTabActive = isHtmlPath(currentTab?.path);
   const previewableTabActive = markdownTabActive || htmlTabActive;
   const previewOpen = previewableTabActive && previewVisible;
+  const showPreviewShortcut = active && editorFocused;
 
   const showTabs = settings.tabsVisible;
 
@@ -908,7 +917,7 @@ export function CodeEditorTile({
               type="button"
               aria-label={previewOpen ? "Show source" : "Show preview"}
               aria-pressed={previewOpen}
-              data-tooltip={previewToggleTooltip(previewOpen)}
+              data-tooltip={previewToggleTooltip(previewOpen, showPreviewShortcut)}
               onClick={togglePreview}
             >
               <span className="code-editor-preview-icon" aria-hidden="true" />
