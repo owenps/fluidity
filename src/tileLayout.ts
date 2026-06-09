@@ -1,5 +1,4 @@
 import {
-  DEFAULT_WORKSPACE_TILE_WIDTH,
   GRID_COLUMNS,
   GRID_MIN_TILE_HEIGHT,
   GRID_MIN_TILE_WIDTH,
@@ -7,35 +6,14 @@ import {
   type Direction,
   type Tile,
 } from "./types";
+import {
+  createTileFromDefinitionSnapshot,
+  tileDefinitionSnapshotForTile,
+  terminalTileDefinition,
+  type TileDefinitionSnapshot,
+} from "./tileDefinitions";
 
-export function createDefaultTiles(): Tile[] {
-  const workspaceTileWidth = DEFAULT_WORKSPACE_TILE_WIDTH;
-
-  return [
-    {
-      id: createTileId(),
-      kind: "terminal",
-      title: "Terminal",
-      x: workspaceTileWidth,
-      y: 0,
-      w: GRID_COLUMNS - workspaceTileWidth,
-      h: GRID_ROWS,
-    },
-    {
-      id: createTileId(),
-      kind: "workspace",
-      title: "Workspaces",
-      x: 0,
-      y: 0,
-      w: workspaceTileWidth,
-      h: GRID_ROWS,
-    },
-  ];
-}
-
-export function createTileId(): string {
-  return `tile-${crypto.randomUUID()}`;
-}
+export { createDefaultTiles, createTileId } from "./tileDefinitions";
 
 export function findTile(tiles: Tile[], tileId: string | null): Tile | undefined {
   if (!tileId) return undefined;
@@ -424,24 +402,12 @@ function verifiedResizePlan(
 
 export type TileSplitDirection = Extract<Direction, "right" | "down">;
 
-type NewTileOptions =
-  | { kind: "terminal"; title: string }
-  | { kind: "workspace"; title: string }
-  | { kind: "code"; title: string }
-  | {
-      kind: "tool";
-      title: string;
-      extensionId: string;
-      integrationId: string;
-      integrationTileId: string;
-    };
-
-const defaultNewTileOptions = { kind: "terminal", title: "Terminal" } as const;
+const defaultNewTileDefinition = terminalTileDefinition satisfies TileDefinitionSnapshot;
 
 export function splitFocusedTile(
   tiles: Tile[],
   focusedTileId: string | null,
-  newTileOptions: NewTileOptions = defaultNewTileOptions,
+  newTileOptions: TileDefinitionSnapshot = defaultNewTileDefinition,
   direction?: TileSplitDirection,
 ): { tiles: Tile[]; focusedTileId: string | null } {
   const focused = findTile(tiles, focusedTileId);
@@ -476,7 +442,7 @@ export function splitFocusedTileInDirection(
   const focused = findTile(tiles, focusedTileId);
   if (!focused) return { tiles, focusedTileId };
 
-  const newTileOptions: NewTileOptions = tileOptionsForClone(focused);
+  const newTileOptions = tileDefinitionSnapshotForTile(focused);
 
   if (direction === "right" && focused.w >= GRID_MIN_TILE_WIDTH * 2) {
     return splitTileRight(tiles, focused, newTileOptions);
@@ -489,67 +455,14 @@ export function splitFocusedTileInDirection(
   return { tiles, focusedTileId };
 }
 
-function createTileFromOptions(
-  options: NewTileOptions,
-  geometry: Pick<Tile, "x" | "y" | "w" | "h">,
-): Tile {
-  const base = {
-    id: createTileId(),
-    title: options.title,
-    ...geometry,
-  };
-
-  if (options.kind === "tool") {
-    return {
-      ...base,
-      kind: "tool",
-      extensionId: options.extensionId,
-      integrationId: options.integrationId,
-      integrationTileId: options.integrationTileId,
-    };
-  }
-
-  if (options.kind === "workspace") {
-    return { ...base, kind: "workspace" };
-  }
-
-  if (options.kind === "code") {
-    return { ...base, kind: "code" };
-  }
-
-  return { ...base, kind: "terminal" };
-}
-
-function tileOptionsForClone(tile: Tile): NewTileOptions {
-  if (tile.kind === "tool") {
-    return {
-      kind: "tool",
-      title: tile.title,
-      extensionId: tile.extensionId,
-      integrationId: tile.integrationId,
-      integrationTileId: tile.integrationTileId,
-    };
-  }
-
-  if (tile.kind === "workspace") {
-    return { kind: "workspace", title: tile.title };
-  }
-
-  if (tile.kind === "code") {
-    return { kind: "code", title: tile.title };
-  }
-
-  return { kind: "terminal", title: tile.title };
-}
-
 function splitTileRight(
   tiles: Tile[],
   focused: Tile,
-  newTileOptions: NewTileOptions,
+  newTileOptions: TileDefinitionSnapshot,
 ): { tiles: Tile[]; focusedTileId: string | null } {
   const leftWidth = Math.floor(focused.w / 2);
   const rightWidth = focused.w - leftWidth;
-  const newTile: Tile = createTileFromOptions(newTileOptions, {
+  const newTile: Tile = createTileFromDefinitionSnapshot(newTileOptions, {
     x: focused.x + leftWidth,
     y: focused.y,
     w: rightWidth,
@@ -565,11 +478,11 @@ function splitTileRight(
 function splitTileDown(
   tiles: Tile[],
   focused: Tile,
-  newTileOptions: NewTileOptions,
+  newTileOptions: TileDefinitionSnapshot,
 ): { tiles: Tile[]; focusedTileId: string | null } {
   const topHeight = Math.floor(focused.h / 2);
   const bottomHeight = focused.h - topHeight;
-  const newTile: Tile = createTileFromOptions(newTileOptions, {
+  const newTile: Tile = createTileFromDefinitionSnapshot(newTileOptions, {
     x: focused.x,
     y: focused.y + topHeight,
     w: focused.w,

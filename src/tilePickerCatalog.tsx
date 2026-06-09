@@ -4,37 +4,21 @@ import geminiLogoUrl from "./assets/gemini-logo.svg";
 import openAiLogoUrl from "./assets/openai-logo.svg";
 import opencodeLogoUrl from "./assets/opencode-logo.svg";
 import piLogoUrl from "./assets/pi-logo.svg";
+import {
+  createTileDefinitions,
+  defaultTileDefinitions,
+  integrationTileDefinitionId,
+  resolveTileDefinition,
+  type TileDefinition,
+  type TileDefinitionIcon,
+} from "./tileDefinitions";
 import type { IntegrationCatalogTile, Tile } from "./types";
 
-export type TilePickerCatalogItem =
-  | {
-      id: string;
-      kind: "terminal";
-      title: string;
-      icon: ReactNode;
-    }
-  | {
-      id: string;
-      kind: "workspace";
-      title: string;
-      icon: ReactNode;
-    }
-  | {
-      id: string;
-      kind: "code";
-      title: string;
-      icon: ReactNode;
-    }
-  | {
-      id: string;
-      kind: "tool";
-      title: string;
-      icon: ReactNode;
-      extensionId: string;
-      integrationId: string;
-      integrationTileId: string;
-    };
+type RenderedTileDefinition<T extends TileDefinition = TileDefinition> = T extends unknown
+  ? Omit<T, "icon"> & { icon: ReactNode; tileDefinition: T }
+  : never;
 
+export type TilePickerCatalogItem = RenderedTileDefinition;
 export type ConfigurableTilePickerCatalogItem = TilePickerCatalogItem & {
   defaultVisible: boolean;
 };
@@ -53,35 +37,7 @@ const iconByKey: Record<string, ReactNode> = {
   pi: <img className="picker-option-logo" src={piLogoUrl} alt="" />,
 };
 
-const terminalTilePickerItem = {
-  id: "terminal",
-  kind: "terminal",
-  title: "Terminal",
-  icon: <span>&gt;_</span>,
-  defaultVisible: true,
-} as const satisfies ConfigurableTilePickerCatalogItem;
-
-const workspaceTilePickerItem = {
-  id: "workspace",
-  kind: "workspace",
-  title: "Workspaces",
-  icon: <span className="workspace-stack-picker-icon" />,
-  defaultVisible: true,
-} as const satisfies ConfigurableTilePickerCatalogItem;
-
-const codeEditorTilePickerItem = {
-  id: "code",
-  kind: "code",
-  title: "Code Editor",
-  icon: <span className="code-editor-picker-icon" />,
-  defaultVisible: true,
-} as const satisfies ConfigurableTilePickerCatalogItem;
-
-export const defaultConfigurableTilePickerItems: ConfigurableTilePickerCatalogItem[] = [
-  workspaceTilePickerItem,
-  codeEditorTilePickerItem,
-  terminalTilePickerItem,
-];
+export const defaultConfigurableTilePickerItems = renderTileDefinitions(defaultTileDefinitions);
 
 export type ConfigurableTilePickerItemId = string;
 export type TilePickerVisibility = Record<ConfigurableTilePickerItemId, boolean>;
@@ -89,23 +45,7 @@ export type TilePickerVisibility = Record<ConfigurableTilePickerItemId, boolean>
 export function createConfigurableTilePickerItems(
   toolTiles: IntegrationCatalogTile[],
 ): ConfigurableTilePickerCatalogItem[] {
-  const integrationTilePickerItems = toolTiles.map((tile) => ({
-    id: integrationTilePickerItemId(tile.extensionId, tile.integrationId, tile.integrationTileId),
-    kind: "tool" as const,
-    title: tile.title,
-    icon: iconForCatalogTile(tile),
-    extensionId: tile.extensionId,
-    integrationId: tile.integrationId,
-    integrationTileId: tile.integrationTileId,
-    defaultVisible: tile.defaultVisible,
-  }));
-
-  return [
-    workspaceTilePickerItem,
-    codeEditorTilePickerItem,
-    ...integrationTilePickerItems,
-    terminalTilePickerItem,
-  ];
+  return renderTileDefinitions(createTileDefinitions(toolTiles));
 }
 
 export function createDefaultTilePickerVisibility(
@@ -134,27 +74,32 @@ export function findTilePickerItemForTile(
   items: ConfigurableTilePickerCatalogItem[],
   tile: Tile,
 ): TilePickerCatalogItem {
-  if (tile.kind === "terminal") return terminalTilePickerItem;
-  if (tile.kind === "workspace") return workspaceTilePickerItem;
-  if (tile.kind === "code") return codeEditorTilePickerItem;
-
-  return (
-    items.find(
-      (item) =>
-        item.kind === "tool" &&
-        item.extensionId === tile.extensionId &&
-        item.integrationId === tile.integrationId &&
-        item.integrationTileId === tile.integrationTileId,
-    ) ?? {
-      id: integrationTilePickerItemId(tile.extensionId, tile.integrationId, tile.integrationTileId),
-      kind: "tool",
-      title: tile.title,
-      icon: <span>!</span>,
-      extensionId: tile.extensionId,
-      integrationId: tile.integrationId,
-      integrationTileId: tile.integrationTileId,
-    }
+  const resolution = resolveTileDefinition(
+    items.map((item) => item.tileDefinition),
+    tile,
   );
+  if (resolution.status === "resolved") return renderTileDefinition(resolution.definition);
+
+  return {
+    id: resolution.identity,
+    kind: "tool",
+    title: resolution.title,
+    icon: <span>!</span>,
+    extensionId: tile.kind === "tool" ? tile.extensionId : "",
+    integrationId: tile.kind === "tool" ? tile.integrationId : "",
+    integrationTileId: tile.kind === "tool" ? tile.integrationTileId : "",
+    defaultVisible: true,
+    tileDefinition: {
+      id: resolution.identity,
+      kind: "tool",
+      title: resolution.title,
+      icon: { kind: "text", fallbackText: "!" },
+      extensionId: tile.kind === "tool" ? tile.extensionId : "",
+      integrationId: tile.kind === "tool" ? tile.integrationId : "",
+      integrationTileId: tile.kind === "tool" ? tile.integrationTileId : "",
+      defaultVisible: true,
+    },
+  };
 }
 
 export function integrationTilePickerItemId(
@@ -162,13 +107,29 @@ export function integrationTilePickerItemId(
   integrationId: string,
   integrationTileId: string,
 ): string {
-  return `${extensionId}:${integrationId}.${integrationTileId}`;
+  return integrationTileDefinitionId(extensionId, integrationId, integrationTileId);
 }
 
-function iconForCatalogTile(tile: IntegrationCatalogTile): ReactNode {
-  if (tile.icon?.kind === "key")
-    return iconByKey[tile.icon.key] ?? textIcon(tile.icon.fallbackText);
-  return textIcon(tile.icon?.fallbackText ?? tile.title.slice(0, 1));
+function renderTileDefinitions(definitions: TileDefinition[]): ConfigurableTilePickerCatalogItem[] {
+  return definitions.map(renderTileDefinition);
+}
+
+function renderTileDefinition(definition: TileDefinition): ConfigurableTilePickerCatalogItem {
+  const { icon: iconIdentity, ...item } = definition;
+  return {
+    ...item,
+    icon: iconForTileDefinition(iconIdentity),
+    tileDefinition: definition,
+  } as ConfigurableTilePickerCatalogItem;
+}
+
+function iconForTileDefinition(icon: TileDefinitionIcon): ReactNode {
+  if (icon.kind === "builtin") {
+    if (icon.key === "workspace") return <span className="workspace-stack-picker-icon" />;
+    if (icon.key === "code") return <span className="code-editor-picker-icon" />;
+  }
+  if (icon.kind === "key") return iconByKey[icon.key] ?? textIcon(icon.fallbackText);
+  return textIcon(icon.fallbackText);
 }
 
 function textIcon(text: string): ReactNode {

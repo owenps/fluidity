@@ -80,8 +80,12 @@ _Avoid_: Archived workspace, closed workspace, hidden workspace
 A movable and resizable object inside a workspace, focused on one kind of work surface.
 _Avoid_: Pane, panel, widget
 
+**Tile Definition**:
+The durable, kind-specific description of a Tile inside Workspace Tile State, excluding geometry and live runtime state.
+_Avoid_: Tile config, tile metadata, tile spec
+
 **Workspace Tile State**:
-The restorable tile collection for an open workspace, including tile definitions, tile geometry, and Tile Resume Metadata, but excluding transient focus, fullscreen, and live tile runtime state.
+The restorable tile collection for an open workspace, including Tile Definitions, tile geometry, and Tile Resume Metadata, but excluding transient focus, fullscreen, and live tile runtime state.
 _Avoid_: Layout, arrangement, tile session
 
 **Tile Resume Metadata**:

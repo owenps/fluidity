@@ -1,15 +1,16 @@
 mod developer_environment;
 mod extension_catalog;
 mod terminal_session_runtime;
+mod tile_definition;
 
 use developer_environment::resolve_for_cwd;
 #[cfg(test)]
 use developer_environment::DeveloperEnvironment;
 use extension_catalog::{
-    ensure_tool_available, extension_catalog_for_workspace, is_valid_contribution_id,
-    is_valid_extension_id, legacy_tool_integration_tile, terminal_launch_plan_for_resolved_tool,
-    tool_integration_tile_for_launch, tool_integration_tile_for_tile, ExtensionSettingsResponse,
-    IntegrationCatalogResponse, ToolAvailabilityResponse,
+    ensure_tool_available, extension_catalog_for_workspace, legacy_tool_integration_tile,
+    terminal_launch_plan_for_resolved_tool, tool_integration_tile_for_launch,
+    tool_integration_tile_for_tile, ExtensionSettingsResponse, IntegrationCatalogResponse,
+    ToolAvailabilityResponse,
 };
 #[cfg(test)]
 use extension_catalog::{
@@ -34,6 +35,12 @@ use tauri::{
 use terminal_session_runtime::{
     TerminalSessionCloseRequest, TerminalSessionCreateRequest, TerminalSessionResizeRequest,
     TerminalSessionWriteRequest, TerminalState,
+};
+#[cfg(test)]
+use tile_definition::is_valid_resume_identifier;
+use tile_definition::{
+    clear_integration_identity, fallback_title_for_builtin_tile, is_builtin_tile_kind,
+    is_valid_persisted_tool_tile_identity, sanitize_resume_metadata,
 };
 use uuid::Uuid;
 
@@ -1821,33 +1828,12 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
             }
         }
 
-        if tile.kind == "terminal" {
+        if is_builtin_tile_kind(&tile.kind) {
+            clear_integration_identity(&mut tile);
             if tile.title.trim().is_empty() {
-                tile.title = "Terminal".to_string();
-            }
-            tiles.push(tile);
-            continue;
-        }
-
-        if tile.kind == "workspace" {
-            tile.extension_id = None;
-            tile.integration_id = None;
-            tile.integration_tile_id = None;
-            tile.resume = None;
-            if tile.title.trim().is_empty() {
-                tile.title = "Workspaces".to_string();
-            }
-            tiles.push(tile);
-            continue;
-        }
-
-        if tile.kind == "code" {
-            tile.extension_id = None;
-            tile.integration_id = None;
-            tile.integration_tile_id = None;
-            tile.resume = None;
-            if tile.title.trim().is_empty() {
-                tile.title = "Code Editor".to_string();
+                if let Some(title) = fallback_title_for_builtin_tile(&tile.kind) {
+                    tile.title = title.to_string();
+                }
             }
             tiles.push(tile);
             continue;
@@ -1884,51 +1870,6 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
     } else {
         WorkspaceTileState { tiles }
     }
-}
-
-fn is_valid_persisted_tool_tile_identity(tile: &PersistedTile) -> bool {
-    tile.extension_id
-        .as_deref()
-        .is_some_and(is_valid_extension_id)
-        && tile
-            .integration_id
-            .as_deref()
-            .is_some_and(is_valid_contribution_id)
-        && tile
-            .integration_tile_id
-            .as_deref()
-            .is_some_and(is_valid_contribution_id)
-}
-
-fn sanitize_resume_metadata(resume: Option<TileResumeMetadata>) -> Option<TileResumeMetadata> {
-    let resume = resume?;
-    if !is_valid_resume_provider(&resume.provider) {
-        return None;
-    }
-    if !is_valid_resume_identifier(&resume.identifier) {
-        return None;
-    }
-    Some(resume)
-}
-
-fn is_valid_resume_provider(provider: &str) -> bool {
-    !provider.is_empty()
-        && provider.len() <= 256
-        && provider.bytes().all(|byte| {
-            byte.is_ascii_lowercase()
-                || byte.is_ascii_digit()
-                || byte == b'-'
-                || byte == b'_'
-                || byte == b'.'
-        })
-}
-
-fn is_valid_resume_identifier(identifier: &str) -> bool {
-    !identifier.is_empty()
-        && identifier.len() <= 512
-        && !identifier.contains('\0')
-        && !identifier.contains('\n')
-        && !identifier.contains('\r')
 }
 
 fn is_valid_tile_geometry(tile: &PersistedTile) -> bool {
