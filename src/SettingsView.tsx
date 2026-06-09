@@ -68,6 +68,8 @@ interface SettingsViewProps {
   onTileHeadersVisibleChange: (visible: boolean) => void;
   deletionPositiveStatColors: boolean;
   onDeletionPositiveStatColorsChange: (enabled: boolean) => void;
+  workspaceBranchPrefix: string;
+  onWorkspaceBranchPrefixChange: (prefix: string) => void;
   tilePickerVisibility: TilePickerVisibility;
   configurableTilePickerItems: ConfigurableTilePickerCatalogItem[];
   toolAvailabilityByPickerItemId: Map<string, ToolAvailability>;
@@ -164,7 +166,9 @@ function controlIdsForSelection(
   expandedTileSettingsItemId: string | null = null,
 ) {
   if (scope === "global") {
-    if (globalCategory === "general") return ["debug-layout", "reset-application"];
+    if (globalCategory === "general") {
+      return ["workspace-branch-prefix", "debug-layout", "reset-application"];
+    }
     if (globalCategory === "appearance") {
       return ["app-theme", "tile-headers", "workspace-stat-colors"];
     }
@@ -187,7 +191,11 @@ function controlIdsForSelection(
   if (!project) return [];
   if (projectCategory === "workspaces") {
     return project.kind === "git"
-      ? ["workspace-copy-files", "delete-workspace-branch-on-discard"]
+      ? [
+          "project-workspace-branch-prefix",
+          "workspace-copy-files",
+          "delete-workspace-branch-on-discard",
+        ]
       : [];
   }
   if (projectCategory === "overview") return ["disconnect-project"];
@@ -206,6 +214,8 @@ export function SettingsView({
   onTileHeadersVisibleChange,
   deletionPositiveStatColors,
   onDeletionPositiveStatColorsChange,
+  workspaceBranchPrefix,
+  onWorkspaceBranchPrefixChange,
   tilePickerVisibility,
   configurableTilePickerItems,
   toolAvailabilityByPickerItemId,
@@ -228,6 +238,8 @@ export function SettingsView({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const projectPickerRef = useRef<HTMLSelectElement | null>(null);
   const themeRef = useRef<HTMLSelectElement | null>(null);
+  const workspaceBranchPrefixRef = useRef<HTMLInputElement | null>(null);
+  const projectWorkspaceBranchPrefixRef = useRef<HTMLInputElement | null>(null);
   const workspaceCopyFilesRef = useRef<HTMLTextAreaElement | null>(null);
   const projectSearchIncludesRef = useRef<HTMLTextAreaElement | null>(null);
   const projectSearchExcludesRef = useRef<HTMLTextAreaElement | null>(null);
@@ -415,6 +427,14 @@ export function SettingsView({
     });
   };
 
+  const updateProjectWorkspaceBranchPrefix = (value: string) => {
+    if (!selectedProject || selectedProject.kind !== "git") return;
+    onProjectSettingsChange(selectedProject.id, {
+      ...selectedProject.settings,
+      workspaceBranchPrefix: value.trim().length === 0 ? null : value,
+    });
+  };
+
   const updateProjectWorkspaceCopyFiles = (value: string) => {
     if (!selectedProject || selectedProject.kind !== "git") return;
     onProjectSettingsChange(selectedProject.id, {
@@ -516,6 +536,14 @@ export function SettingsView({
     }
     if (activeControlId === "app-theme") {
       themeRef.current?.focus();
+      return;
+    }
+    if (activeControlId === "workspace-branch-prefix") {
+      workspaceBranchPrefixRef.current?.focus();
+      return;
+    }
+    if (activeControlId === "project-workspace-branch-prefix") {
+      projectWorkspaceBranchPrefixRef.current?.focus();
       return;
     }
     if (activeControlId.startsWith("tile-picker:")) {
@@ -863,6 +891,7 @@ export function SettingsView({
             <span className="settings-value">{appVersion ?? "Loading…"}</span>
           </span>
         </div>
+        {renderWorkspaceBranchPrefixControl()}
         {renderToggleRow({
           id: "debug-layout",
           title: "Debug mode",
@@ -882,6 +911,35 @@ export function SettingsView({
           })}
         </div>
       </div>
+    );
+  }
+
+  function renderWorkspaceBranchPrefixControl() {
+    const active = activeControlId === "workspace-branch-prefix" && focusPane === "right";
+
+    return (
+      <label
+        className={["settings-row", active ? "settings-row-active" : ""].join(" ")}
+        onClick={() => setActiveControlId("workspace-branch-prefix")}
+      >
+        <span className="settings-row-copy">
+          <span className="settings-row-title">Workspace Branch Prefix</span>
+          <span className="settings-row-description">
+            Prepended to generated Workspace Branch names. Example: owenps/
+          </span>
+        </span>
+        <span className="settings-row-control">
+          <input
+            ref={workspaceBranchPrefixRef}
+            className="settings-text-control"
+            value={workspaceBranchPrefix}
+            placeholder="none"
+            spellCheck={false}
+            onFocus={() => setActiveControlId("workspace-branch-prefix")}
+            onChange={(event) => onWorkspaceBranchPrefixChange(event.currentTarget.value)}
+          />
+        </span>
+      </label>
     );
   }
 
@@ -1407,6 +1465,7 @@ export function SettingsView({
 
     return (
       <div className="settings-detail-body">
+        {renderProjectWorkspaceBranchPrefixControl()}
         {renderWorkspaceCopyFilesControl()}
         {renderToggleRow({
           id: "delete-workspace-branch-on-discard",
@@ -1447,6 +1506,36 @@ export function SettingsView({
           onClick: confirmProjectRemoval,
         })}
       </div>
+    );
+  }
+
+  function renderProjectWorkspaceBranchPrefixControl() {
+    if (!selectedProject || selectedProject.kind !== "git") return null;
+    const active = activeControlId === "project-workspace-branch-prefix" && focusPane === "right";
+
+    return (
+      <label
+        className={["settings-row", active ? "settings-row-active" : ""].join(" ")}
+        onClick={() => setActiveControlId("project-workspace-branch-prefix")}
+      >
+        <span className="settings-row-copy">
+          <span className="settings-row-title">Workspace Branch Prefix</span>
+          <span className="settings-row-description">
+            Project override. Leave empty to use global prefix ({workspaceBranchPrefix || "none"}).
+          </span>
+        </span>
+        <span className="settings-row-control">
+          <input
+            ref={projectWorkspaceBranchPrefixRef}
+            className="settings-text-control"
+            value={selectedProject.settings.workspaceBranchPrefix ?? ""}
+            placeholder={workspaceBranchPrefix || "none"}
+            spellCheck={false}
+            onFocus={() => setActiveControlId("project-workspace-branch-prefix")}
+            onChange={(event) => updateProjectWorkspaceBranchPrefix(event.currentTarget.value)}
+          />
+        </span>
+      </label>
     );
   }
 

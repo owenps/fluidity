@@ -99,8 +99,9 @@ function loadRecentProjectFilesByWorkspace(): RecentProjectFilesByWorkspace {
 
     return Object.fromEntries(
       Object.entries(parsed)
-        .filter((entry): entry is [string, string[]] =>
-          Array.isArray(entry[1]) && entry[1].every((path) => typeof path === "string"),
+        .filter(
+          (entry): entry is [string, string[]] =>
+            Array.isArray(entry[1]) && entry[1].every((path) => typeof path === "string"),
         )
         .map(([workspaceId, paths]) => [workspaceId, paths.slice(0, maxRecentProjectFiles)]),
     );
@@ -280,6 +281,7 @@ export function App() {
     themeId,
     tileHeadersVisible,
     deletionPositiveStatColors,
+    workspaceBranchPrefix,
     tilePickerVisibility,
   } = settings;
   const layoutRef = useRef(layout);
@@ -1001,6 +1003,10 @@ export function App() {
     updateSettings((previous) => ({ ...previous, deletionPositiveStatColors }));
   };
 
+  const setWorkspaceBranchPrefixSetting = (workspaceBranchPrefix: string) => {
+    updateSettings((previous) => ({ ...previous, workspaceBranchPrefix }));
+  };
+
   const setTilePickerItemVisibility = (itemId: ConfigurableTilePickerItemId, visible: boolean) => {
     updateSettings((previous) => ({
       ...previous,
@@ -1338,6 +1344,8 @@ export function App() {
           onTileHeadersVisibleChange={setTileHeadersVisibleSetting}
           deletionPositiveStatColors={deletionPositiveStatColors}
           onDeletionPositiveStatColorsChange={setDeletionPositiveStatColorsSetting}
+          workspaceBranchPrefix={workspaceBranchPrefix}
+          onWorkspaceBranchPrefixChange={setWorkspaceBranchPrefixSetting}
           tilePickerVisibility={tilePickerVisibility}
           configurableTilePickerItems={configurableTilePickerItems}
           toolAvailabilityByPickerItemId={toolAvailabilityByPickerItemId}

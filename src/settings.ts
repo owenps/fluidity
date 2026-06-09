@@ -19,6 +19,7 @@ export interface AppSettings {
   tileHeadersVisible: boolean;
   tileSettings: TileSettings;
   deletionPositiveStatColors: boolean;
+  workspaceBranchPrefix: string;
   tilePickerVisibility: TilePickerVisibility;
 }
 
@@ -117,6 +118,7 @@ export function createDefaultAppSettings(debugLayout = false): AppSettings {
     tileHeadersVisible: true,
     tileSettings: createDefaultTileSettings(),
     deletionPositiveStatColors: false,
+    workspaceBranchPrefix: "",
     tilePickerVisibility: createDefaultTilePickerVisibility(),
   };
 }
@@ -165,6 +167,8 @@ export function normalizeAppSettings(value: Partial<AppSettings> | null | undefi
       typeof value?.deletionPositiveStatColors === "boolean"
         ? value.deletionPositiveStatColors
         : defaults.deletionPositiveStatColors,
+    workspaceBranchPrefix:
+      typeof value?.workspaceBranchPrefix === "string" ? value.workspaceBranchPrefix : "",
     tilePickerVisibility: readTilePickerVisibility(
       value?.tilePickerVisibility,
       defaults.tilePickerVisibility,

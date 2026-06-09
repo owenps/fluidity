@@ -1622,7 +1622,8 @@ body {
   align-items: stretch;
 }
 
-.settings-select-control {
+.settings-select-control,
+.settings-text-control {
   min-width: 12rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1633,7 +1634,12 @@ body {
   font-size: var(--font-size-sm);
 }
 
-.settings-select-control:focus {
+.settings-text-control {
+  font-family: var(--font-mono);
+}
+
+.settings-select-control:focus,
+.settings-text-control:focus {
   outline: 1px solid var(--ring);
 }
 

@@ -140,6 +140,8 @@ struct AppSettings {
     tile_settings: TileSettings,
     deletion_positive_stat_colors: bool,
     #[serde(default)]
+    workspace_branch_prefix: String,
+    #[serde(default)]
     tile_picker_visibility: HashMap<String, bool>,
 }
 
@@ -255,6 +257,7 @@ impl Default for AppSettings {
             tile_headers_visible: true,
             tile_settings: TileSettings::default(),
             deletion_positive_stat_colors: false,
+            workspace_branch_prefix: String::new(),
             tile_picker_visibility: HashMap::new(),
         }
     }
@@ -265,6 +268,8 @@ impl Default for AppSettings {
 struct ProjectSettings {
     #[serde(default)]
     delete_workspace_branch_on_discard: bool,
+    #[serde(default)]
+    workspace_branch_prefix: Option<String>,
     #[serde(default)]
     workspace_copy_files: Vec<String>,
     #[serde(default)]
@@ -700,8 +705,14 @@ fn app_settings_update(
     state: State<'_, WorkspaceState>,
     request: AppSettingsUpdateRequest,
 ) -> Result<AppSettings, String> {
+    let mut settings = request.settings;
+    settings.workspace_branch_prefix = normalize_workspace_branch_prefix(
+        &settings.workspace_branch_prefix,
+        "Workspace Branch Prefix",
+    )?;
+
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
-    app_state.settings = request.settings;
+    app_state.settings = settings;
     state.save(&app_state)?;
     Ok(app_state.settings.clone())
 }
@@ -712,12 +723,20 @@ fn project_settings_update(
     request: ProjectSettingsUpdateRequest,
 ) -> Result<RegisteredProjectListItem, String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
+    let mut settings = request.settings;
+    settings.workspace_branch_prefix = settings
+        .workspace_branch_prefix
+        .as_deref()
+        .map(|prefix| normalize_workspace_branch_prefix(prefix, "Project Workspace Branch Prefix"))
+        .transpose()?
+        .filter(|prefix| !prefix.is_empty());
+
     let project = app_state
         .projects
         .iter_mut()
         .find(|project| project.id == request.project_id)
         .ok_or_else(|| "project not found".to_string())?;
-    project.settings = request.settings;
+    project.settings = settings;
     let response = project_list_item(project);
     state.save(&app_state)?;
     Ok(response)
@@ -1580,8 +1599,9 @@ fn create_git_workspace(
     }
 
     let base_ref = workspace_base_ref(&project.root)?;
-    let branch = next_workspace_branch_name(app_state, &project.root)?;
-    let workspace_id = format!("workspace-{branch}");
+    let branch_prefix = effective_workspace_branch_prefix(app_state, project)?;
+    let branch = next_workspace_branch_name(app_state, &project.root, &branch_prefix)?;
+    let workspace_id = format!("workspace-{}", Uuid::new_v4());
     let workspace_root = app_data_dir
         .join("workspaces")
         .join(format!(
@@ -1589,7 +1609,7 @@ fn create_git_workspace(
             sanitize_path_segment(&project.name),
             sanitize_path_segment(&project.id)
         ))
-        .join(&branch);
+        .join(sanitize_path_segment(&branch));
 
     if let Some(parent) = workspace_root.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -2646,7 +2666,51 @@ fn workspace_base_ref(root: &str) -> Result<String, String> {
     Err("could not find a workspace base branch; set origin/HEAD or configure an upstream for the current branch".to_string())
 }
 
-fn next_workspace_branch_name(app_state: &PersistedAppState, root: &str) -> Result<String, String> {
+fn effective_workspace_branch_prefix(
+    app_state: &PersistedAppState,
+    project: &RegisteredProject,
+) -> Result<String, String> {
+    let prefix = project
+        .settings
+        .workspace_branch_prefix
+        .as_deref()
+        .unwrap_or(&app_state.settings.workspace_branch_prefix);
+    normalize_workspace_branch_prefix(prefix, "Workspace Branch Prefix")
+}
+
+fn normalize_workspace_branch_prefix(value: &str, label: &str) -> Result<String, String> {
+    let prefix = value.trim();
+    if prefix.is_empty() {
+        return Ok(String::new());
+    }
+    if prefix.starts_with('/') || prefix.contains("//") {
+        return Err(format!("{label} cannot start with / or contain //"));
+    }
+    if prefix.contains("..") {
+        return Err(format!("{label} cannot contain .."));
+    }
+    if prefix.chars().any(|character| {
+        !character.is_ascii_alphanumeric() && !matches!(character, '/' | '-' | '_' | '.')
+    }) {
+        return Err(format!(
+            "{label} can only contain letters, numbers, /, -, _, and ."
+        ));
+    }
+    if prefix
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .any(|component| component == "." || component.ends_with(".lock"))
+    {
+        return Err(format!("{label} cannot contain . or .lock path components"));
+    }
+    Ok(prefix.to_string())
+}
+
+fn next_workspace_branch_name(
+    app_state: &PersistedAppState,
+    root: &str,
+    prefix: &str,
+) -> Result<String, String> {
     let mut used: HashSet<String> = app_state
         .generated_workspace_branch_names
         .iter()
@@ -2659,18 +2723,23 @@ fn next_workspace_branch_name(app_state: &PersistedAppState, root: &str) -> Resu
         for index in 0..WORKSPACE_BRANCH_TREE_NAMES.len() {
             let tree_name =
                 WORKSPACE_BRANCH_TREE_NAMES[(offset + index) % WORKSPACE_BRANCH_TREE_NAMES.len()];
-            let candidate = if suffix == 1 {
+            let unprefixed = if suffix == 1 {
                 tree_name.to_string()
             } else {
                 format!("{tree_name}-{suffix}")
             };
-            if !used.contains(&candidate) {
+            let candidate = format!("{prefix}{unprefixed}");
+            if !used.contains(&candidate) && git_branch_name_is_valid(root, &candidate) {
                 return Ok(candidate);
             }
         }
     }
 
     Err("could not generate a unique workspace branch name".to_string())
+}
+
+fn git_branch_name_is_valid(root: &str, branch: &str) -> bool {
+    git_command_succeeds(root, &["check-ref-format", "--branch", branch]).unwrap_or(false)
 }
 
 fn local_git_branch_names(root: &str) -> Result<HashSet<String>, String> {
@@ -3167,6 +3236,78 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn workspace_branch_prefix_applies_to_generated_branches() {
+        let temp_dir = test_temp_dir("fluidity-branch-prefix");
+        let app_data_dir = temp_dir.join("app-data");
+        let project_root = temp_dir.join("project");
+        setup_git_project_root(&project_root);
+        fs::create_dir_all(&app_data_dir).unwrap();
+
+        let project =
+            test_registered_project("project-1", &project_root, ProjectSettings::default());
+        let mut app_state = PersistedAppState::default();
+        app_state.settings.workspace_branch_prefix = "owenps/".to_string();
+        let mut warnings = Vec::new();
+
+        let workspace =
+            create_git_workspace(&app_data_dir, &mut app_state, &project, &mut warnings).unwrap();
+        let branch = workspace.git_branch.as_deref().unwrap();
+
+        assert!(branch.starts_with("owenps/"));
+        assert!(local_git_branch_names(&path_to_string(&project_root))
+            .unwrap()
+            .contains(branch));
+        assert_eq!(
+            Path::new(&workspace.root)
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some(sanitize_path_segment(branch).as_str())
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn project_workspace_branch_prefix_overrides_global_prefix() {
+        let temp_dir = test_temp_dir("fluidity-project-branch-prefix");
+        let app_data_dir = temp_dir.join("app-data");
+        let project_root = temp_dir.join("project");
+        setup_git_project_root(&project_root);
+        fs::create_dir_all(&app_data_dir).unwrap();
+
+        let project = test_registered_project(
+            "project-1",
+            &project_root,
+            ProjectSettings {
+                workspace_branch_prefix: Some("project/".to_string()),
+                ..ProjectSettings::default()
+            },
+        );
+        let mut app_state = PersistedAppState::default();
+        app_state.settings.workspace_branch_prefix = "global/".to_string();
+        let mut warnings = Vec::new();
+
+        let workspace =
+            create_git_workspace(&app_data_dir, &mut app_state, &project, &mut warnings).unwrap();
+
+        assert!(workspace
+            .git_branch
+            .as_deref()
+            .unwrap()
+            .starts_with("project/"));
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn workspace_branch_prefix_rejects_invalid_ref_fragments() {
+        assert!(normalize_workspace_branch_prefix("owenps/", "prefix").is_ok());
+        assert!(normalize_workspace_branch_prefix("bad prefix/", "prefix").is_err());
+        assert!(normalize_workspace_branch_prefix("bad//prefix/", "prefix").is_err());
+        assert!(normalize_workspace_branch_prefix("../bad/", "prefix").is_err());
     }
 
     #[test]

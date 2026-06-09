@@ -78,6 +78,7 @@ export type ProjectKind = "git" | "plain";
 
 export interface ProjectSettings {
   deleteWorkspaceBranchOnDiscard: boolean;
+  workspaceBranchPrefix: string | null;
   workspaceCopyFiles: string[];
   projectSearchIncludePaths: string[];
   projectSearchExcludePaths: string[];
