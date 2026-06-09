@@ -1,6 +1,16 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_NAME } from "./appConstants";
+import {
+  codeEditorFontSizeMax,
+  codeEditorFontSizeMin,
+  codeEditorTabSizeMax,
+  codeEditorTabSizeMin,
+  normalizeCodeEditorSettings,
+  normalizeTerminalTileSettings,
+  terminalFontSizeMax,
+  terminalFontSizeMin,
+} from "./settings";
 import { themeOptions, type ThemeId } from "./themeRegistry";
 import { keyboardShortcutGroups } from "./commands";
 import { KeyChord } from "./KeyCap";
@@ -16,14 +26,17 @@ import type {
   ExtensionDiagnostic,
   ExtensionSettingsEntry,
   ExtensionSettingsResponse,
+  CodeEditorSettings,
   ProjectSettings,
   RegisteredProject,
+  TerminalTileSettings,
+  TileSettings,
   ToolAvailability,
 } from "./types";
 
-const terminalFontSizeMin = 10;
-const terminalFontSizeMax = 24;
 const terminalFontSizeStep = 1;
+const codeEditorFontSizeStep = 1;
+const codeEditorTabSizeStep = 1;
 
 type SettingsScope = "global" | "project";
 type SettingsCategoryId = "general" | "appearance" | "tiles" | "extensions" | "keybinds";
@@ -47,8 +60,8 @@ const projectSettingsCategories: { id: ProjectSettingsCategoryId; title: string 
 interface SettingsViewProps {
   debugLayout: boolean;
   onDebugLayoutChange: (enabled: boolean) => void;
-  terminalFontSize: number;
-  onTerminalFontSizeChange: (fontSize: number) => void;
+  tileSettings: TileSettings;
+  onTileSettingsChange: (settings: TileSettings) => void;
   themeId: ThemeId;
   onThemeChange: (themeId: ThemeId) => void;
   tileHeadersVisible: boolean;
@@ -117,23 +130,52 @@ function reconcileTilePickerConfigurationItems(
   return [...preservedItems, ...sortedTilePickerConfigurationItems(addedItems, visibility)];
 }
 
+function codeEditorControlIds(prefix: string) {
+  return [
+    `${prefix}:line-numbers`,
+    `${prefix}:minimap`,
+    `${prefix}:word-wrap`,
+    `${prefix}:font-size`,
+    `${prefix}:tab-size`,
+    `${prefix}:vim-mode`,
+    `${prefix}:bracket-pair-colorization`,
+    `${prefix}:sticky-scroll`,
+    `${prefix}:auto-save`,
+    `${prefix}:tab-title-mode`,
+  ];
+}
+
+function terminalControlIds(prefix: string) {
+  return [`${prefix}:font-size`];
+}
+
+function tileSettingsControlIds(item: ConfigurableTilePickerCatalogItem) {
+  if (item.kind === "terminal") return terminalControlIds("tile-terminal");
+  if (item.kind === "code") return codeEditorControlIds("tile-code-editor");
+  return [];
+}
+
 function controlIdsForSelection(
   scope: SettingsScope,
   globalCategory: SettingsCategoryId,
   projectCategory: ProjectSettingsCategoryId,
   project: RegisteredProject | null,
   tilePickerItems = defaultConfigurableTilePickerItems,
+  expandedTileSettingsItemId: string | null = null,
 ) {
   if (scope === "global") {
     if (globalCategory === "general") return ["debug-layout", "reset-application"];
     if (globalCategory === "appearance") {
-      return ["terminal-font-size", "app-theme", "tile-headers", "workspace-stat-colors"];
+      return ["app-theme", "tile-headers", "workspace-stat-colors"];
     }
     if (globalCategory === "tiles") {
       return [
         "tile-picker-refresh",
         "tile-picker-search",
-        ...tilePickerItems.map((item) => `tile-picker:${item.id}`),
+        ...tilePickerItems.flatMap((item) => [
+          `tile-picker:${item.id}`,
+          ...(expandedTileSettingsItemId === item.id ? tileSettingsControlIds(item) : []),
+        ]),
       ];
     }
     if (globalCategory === "extensions") return ["extensions-reload"];
@@ -156,8 +198,8 @@ function controlIdsForSelection(
 export function SettingsView({
   debugLayout,
   onDebugLayoutChange,
-  terminalFontSize,
-  onTerminalFontSizeChange,
+  tileSettings,
+  onTileSettingsChange,
   themeId,
   onThemeChange,
   tileHeadersVisible,
@@ -204,6 +246,7 @@ export function SettingsView({
   const [tilePickerDisplayItems, setTilePickerDisplayItems] = useState(() =>
     sortedTilePickerConfigurationItems(configurableTilePickerItems, tilePickerVisibility),
   );
+  const [expandedTileSettingsItemId, setExpandedTileSettingsItemId] = useState<string | null>(null);
   const [pendingReset, setPendingReset] = useState(false);
   const [pendingProjectRemovalId, setPendingProjectRemovalId] = useState<string | null>(null);
 
@@ -223,6 +266,7 @@ export function SettingsView({
         selectedProjectCategory,
         selectedProject,
         tilePickerDisplayItems,
+        expandedTileSettingsItemId,
       ),
     [
       settingsScope,
@@ -230,6 +274,7 @@ export function SettingsView({
       selectedProjectCategory,
       selectedProject,
       tilePickerDisplayItems,
+      expandedTileSettingsItemId,
     ],
   );
   const visibleTilePickerItems = useMemo(() => {
@@ -298,6 +343,7 @@ export function SettingsView({
       selectedProjectCategory,
       selectedProject,
       tilePickerDisplayItems,
+      expandedTileSettingsItemId,
     );
     if (validControlIds.includes(activeControlId)) return;
     setActiveControlId(validControlIds[0] ?? "");
@@ -308,6 +354,7 @@ export function SettingsView({
     selectedProjectCategory,
     selectedProject,
     tilePickerDisplayItems,
+    expandedTileSettingsItemId,
   ]);
 
   useEffect(() => {
@@ -343,10 +390,21 @@ export function SettingsView({
     setActiveControlId(rightControlIds[nextIndex]);
   };
 
-  const changeTerminalFontSize = (fontSize: number) => {
-    onTerminalFontSizeChange(
-      Math.min(terminalFontSizeMax, Math.max(terminalFontSizeMin, fontSize)),
-    );
+  const terminalTileSettings = normalizeTerminalTileSettings(tileSettings.terminal);
+  const codeEditorSettings = normalizeCodeEditorSettings(tileSettings.codeEditor);
+
+  const updateTerminalTileSettings = (patch: Partial<TerminalTileSettings>) => {
+    onTileSettingsChange({
+      ...tileSettings,
+      terminal: normalizeTerminalTileSettings({ ...tileSettings.terminal, ...patch }),
+    });
+  };
+
+  const updateCodeEditorSettings = (patch: Partial<CodeEditorSettings>) => {
+    onTileSettingsChange({
+      ...tileSettings,
+      codeEditor: normalizeCodeEditorSettings({ ...tileSettings.codeEditor, ...patch }),
+    });
   };
 
   const toggleProjectBranchDiscardPolicy = () => {
@@ -410,6 +468,23 @@ export function SettingsView({
     onRemoveProject(selectedProject.id);
   };
 
+  const activateCodeEditorControl = (controlId: string) => {
+    if (!controlId.startsWith("tile-code-editor:")) return;
+    const key = controlId.slice("tile-code-editor:".length);
+    const current = codeEditorSettings;
+
+    if (key === "line-numbers") {
+      updateCodeEditorSettings({ lineNumbersVisible: !current.lineNumbersVisible });
+    }
+    if (key === "minimap") updateCodeEditorSettings({ minimapVisible: !current.minimapVisible });
+    if (key === "word-wrap") updateCodeEditorSettings({ wordWrap: !current.wordWrap });
+    if (key === "vim-mode") updateCodeEditorSettings({ vimMode: !current.vimMode });
+    if (key === "bracket-pair-colorization") {
+      updateCodeEditorSettings({ bracketPairColorization: !current.bracketPairColorization });
+    }
+    if (key === "sticky-scroll") updateCodeEditorSettings({ stickyScroll: !current.stickyScroll });
+  };
+
   const activateControl = () => {
     if (activeControlId === "debug-layout") {
       onDebugLayoutChange(!debugLayout);
@@ -421,6 +496,10 @@ export function SettingsView({
     }
     if (activeControlId === "tile-headers") {
       onTileHeadersVisibleChange(!tileHeadersVisible);
+      return;
+    }
+    if (activeControlId.startsWith("tile-code-editor:")) {
+      activateCodeEditorControl(activeControlId);
       return;
     }
     if (activeControlId === "tile-picker-refresh") {
@@ -469,12 +548,59 @@ export function SettingsView({
     }
   };
 
+  const expandActiveTileSettingsRow = () => {
+    if (!activeControlId.startsWith("tile-picker:")) return false;
+    const itemId = activeControlId.slice("tile-picker:".length);
+    const item = tilePickerDisplayItems.find((candidate) => candidate.id === itemId);
+    if (!item || tileSettingsControlIds(item).length === 0) return false;
+    setExpandedTileSettingsItemId(item.id);
+    return true;
+  };
+
+  const collapseActiveTileSettingsRow = () => {
+    if (activeControlId.startsWith("tile-picker:")) {
+      const itemId = activeControlId.slice("tile-picker:".length);
+      if (expandedTileSettingsItemId !== itemId) return false;
+      setExpandedTileSettingsItemId(null);
+      return true;
+    }
+    if (activeControlId.startsWith("tile-terminal:")) {
+      setExpandedTileSettingsItemId(null);
+      setActiveControlId("tile-picker:terminal");
+      return true;
+    }
+    if (activeControlId.startsWith("tile-code-editor:")) {
+      setExpandedTileSettingsItemId(null);
+      setActiveControlId("tile-picker:code");
+      return true;
+    }
+    return false;
+  };
+
   const adjustControl = (delta: number) => {
-    if (activeControlId === "terminal-font-size") {
-      changeTerminalFontSize(terminalFontSize + delta * terminalFontSizeStep);
+    if (delta > 0 && expandActiveTileSettingsRow()) return;
+    if (activeControlId === "tile-terminal:font-size") {
+      updateTerminalTileSettings({
+        fontSize: terminalTileSettings.fontSize + delta * terminalFontSizeStep,
+      });
+      return;
+    }
+    if (activeControlId.startsWith("tile-code-editor:")) {
+      adjustCodeEditorControl(activeControlId, delta);
       return;
     }
     if (delta > 0) activateControl();
+  };
+
+  const adjustCodeEditorControl = (controlId: string, delta: number) => {
+    if (!controlId.startsWith("tile-code-editor:")) return;
+    const key = controlId.slice("tile-code-editor:".length);
+    const current = codeEditorSettings;
+    if (key === "font-size") {
+      updateCodeEditorSettings({ fontSize: current.fontSize + delta * codeEditorFontSizeStep });
+    } else if (key === "tab-size") {
+      updateCodeEditorSettings({ tabSize: current.tabSize + delta * codeEditorTabSizeStep });
+    } else if (delta > 0) activateCodeEditorControl(controlId);
   };
 
   const switchSettingsScope = () => {
@@ -548,6 +674,7 @@ export function SettingsView({
     }
     if (event.key === "h" || event.key === "ArrowLeft") {
       event.preventDefault();
+      if (collapseActiveTileSettingsRow()) return;
       setFocusPane("left");
       return;
     }
@@ -766,34 +893,6 @@ export function SettingsView({
         <label
           className={[
             "settings-row",
-            activeControlId === "terminal-font-size" && focusPane === "right"
-              ? "settings-row-active"
-              : "",
-          ].join(" ")}
-          onMouseEnter={() => setActiveControlId("terminal-font-size")}
-          onFocus={() => setActiveControlId("terminal-font-size")}
-        >
-          <span className="settings-row-copy">
-            <span className="settings-row-title">Terminal font size</span>
-            <span className="settings-row-description">
-              Adjust the font size used by terminal-rendered tiles.
-            </span>
-          </span>
-          <span className="settings-row-control settings-slider-control">
-            <Slider
-              value={terminalFontSize}
-              min={terminalFontSizeMin}
-              max={terminalFontSizeMax}
-              step={terminalFontSizeStep}
-              ariaLabel="Terminal font size"
-              onValueChange={changeTerminalFontSize}
-            />
-            <span className="settings-value">{terminalFontSize}px</span>
-          </span>
-        </label>
-        <label
-          className={[
-            "settings-row",
             activeControlId === "app-theme" && focusPane === "right" ? "settings-row-active" : "",
           ].join(" ")}
           onMouseEnter={() => setActiveControlId("app-theme")}
@@ -837,86 +936,226 @@ export function SettingsView({
     );
   }
 
+  function renderCodeEditorSettingsRows(
+    prefix: "tile-code-editor",
+    value: CodeEditorSettings,
+    onChange: (patch: Partial<CodeEditorSettings>) => void,
+  ) {
+    return (
+      <>
+        {renderToggleRow({
+          id: `${prefix}:line-numbers`,
+          title: "Line numbers",
+          description: "Show line numbers in Code Editor tiles.",
+          checked: value.lineNumbersVisible,
+          onChange: (lineNumbersVisible) => onChange({ lineNumbersVisible }),
+        })}
+        {renderToggleRow({
+          id: `${prefix}:minimap`,
+          title: "Minimap",
+          description: "Show the Code Editor minimap.",
+          checked: value.minimapVisible,
+          onChange: (minimapVisible) => onChange({ minimapVisible }),
+        })}
+        {renderToggleRow({
+          id: `${prefix}:word-wrap`,
+          title: "Word wrap",
+          description: "Wrap long lines instead of scrolling horizontally.",
+          checked: value.wordWrap,
+          onChange: (wordWrap) => onChange({ wordWrap }),
+        })}
+        {renderNumberSliderRow({
+          id: `${prefix}:font-size`,
+          title: "Font size",
+          description: "Adjust editor text size.",
+          value: value.fontSize,
+          min: codeEditorFontSizeMin,
+          max: codeEditorFontSizeMax,
+          step: codeEditorFontSizeStep,
+          suffix: "px",
+          ariaLabel: "Code editor font size",
+          onChange: (fontSize) => onChange({ fontSize }),
+        })}
+        {renderNumberSliderRow({
+          id: `${prefix}:tab-size`,
+          title: "Tab size",
+          description: "Number of spaces for indentation tabs.",
+          value: value.tabSize,
+          min: codeEditorTabSizeMin,
+          max: codeEditorTabSizeMax,
+          step: codeEditorTabSizeStep,
+          suffix: " spaces",
+          ariaLabel: "Code editor tab size",
+          onChange: (tabSize) => onChange({ tabSize }),
+        })}
+        {renderToggleRow({
+          id: `${prefix}:vim-mode`,
+          title: "Vim mode",
+          description: "Use Vim keybindings in Code Editor tiles.",
+          checked: value.vimMode,
+          onChange: (vimMode) => onChange({ vimMode }),
+        })}
+        {renderToggleRow({
+          id: `${prefix}:bracket-pair-colorization`,
+          title: "Bracket pair colorization",
+          description: "Color matching bracket pairs.",
+          checked: value.bracketPairColorization,
+          onChange: (bracketPairColorization) => onChange({ bracketPairColorization }),
+        })}
+        {renderToggleRow({
+          id: `${prefix}:sticky-scroll`,
+          title: "Sticky scroll",
+          description: "Pin current scope headers while scrolling.",
+          checked: value.stickyScroll,
+          onChange: (stickyScroll) => onChange({ stickyScroll }),
+        })}
+        {renderSelectRow({
+          id: `${prefix}:auto-save`,
+          title: "Auto-save",
+          description: "Save automatically after edits or focus changes.",
+          value: value.autoSave,
+          options: [
+            ["off", "Off"],
+            ["onFocusChange", "On focus change"],
+            ["afterDelay", "After delay"],
+          ],
+          onChange: (autoSave) =>
+            onChange({ autoSave: autoSave as CodeEditorSettings["autoSave"] }),
+        })}
+        {renderSelectRow({
+          id: `${prefix}:tab-title-mode`,
+          title: "Tab title",
+          description: "Show full paths or only basenames in editor tabs.",
+          value: value.tabTitleMode,
+          options: [
+            ["path", "Full path"],
+            ["basename", "Basename"],
+          ],
+          onChange: (tabTitleMode) =>
+            onChange({ tabTitleMode: tabTitleMode as CodeEditorSettings["tabTitleMode"] }),
+        })}
+      </>
+    );
+  }
+
+  function renderTerminalSettingsRows() {
+    return renderNumberSliderRow({
+      id: "tile-terminal:font-size",
+      title: "Font size",
+      description: "Adjust the font size used by Terminal tiles.",
+      value: terminalTileSettings.fontSize,
+      min: terminalFontSizeMin,
+      max: terminalFontSizeMax,
+      step: terminalFontSizeStep,
+      suffix: "px",
+      ariaLabel: "Terminal font size",
+      onChange: (fontSize) => updateTerminalTileSettings({ fontSize }),
+    });
+  }
+
   function renderTilesDetail() {
     return (
       <div className="settings-detail-body settings-tiles-body">
-        <section
-          className="settings-inline-panel settings-detail-panel settings-tile-picker-panel"
-          aria-label="Tile configuration"
-        >
-          <div className="settings-inline-panel-header settings-integrations-header">
-            <span>Configure which tiles appear in the picker.</span>
-            <button
-              className={[
-                "settings-integration-refresh-button",
-                activeControlId === "tile-picker-refresh" && focusPane === "right"
-                  ? "settings-button-active"
-                  : "",
-              ].join(" ")}
-              type="button"
-              onMouseEnter={() => setActiveControlId("tile-picker-refresh")}
-              onClick={onRefreshToolAvailabilities}
-            >
-              Refresh
-            </button>
-          </div>
-          <div className="picker-search-row">
-            <input
-              ref={searchRef}
-              className={[
-                "picker-search",
-                activeControlId === "tile-picker-search" && focusPane === "right"
-                  ? "settings-input-active"
-                  : "",
-              ].join(" ")}
-              value={tilePickerQuery}
-              placeholder="Filter tile types"
-              aria-label="Filter tile types"
-              onFocus={() => setActiveControlId("tile-picker-search")}
-              onChange={(event) => setTilePickerQuery(event.currentTarget.value)}
-            />
-          </div>
-          <div
-            className="selector-options settings-tile-picker-options"
-            role="listbox"
-            aria-label="Tile picker items"
+        <div className="settings-tile-picker-toolbar">
+          <span>Configure tile visibility and settings.</span>
+          <button
+            className={[
+              "settings-integration-refresh-button",
+              activeControlId === "tile-picker-refresh" && focusPane === "right"
+                ? "settings-button-active"
+                : "",
+            ].join(" ")}
+            type="button"
+            onMouseEnter={() => setActiveControlId("tile-picker-refresh")}
+            onClick={onRefreshToolAvailabilities}
           >
-            {visibleTilePickerItems.map((item) => {
-              const active = activeControlId === `tile-picker:${item.id}` && focusPane === "right";
-              return (
-                <label
-                  key={item.id}
-                  className={["selector-option", active ? "selector-option-active" : ""].join(" ")}
-                  onMouseEnter={() => setActiveControlId(`tile-picker:${item.id}`)}
-                >
-                  <span className="picker-option-icon" aria-hidden="true">
-                    {item.icon}
-                  </span>
-                  <span className="picker-option-copy">
-                    <span className="picker-option-title">{item.title}</span>
-                    {availabilityDetailForItem(item) ? (
-                      <span className="picker-option-detail">
-                        {availabilityDetailForItem(item)}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="settings-row-control">
-                    <Toggle
-                      checked={tilePickerVisibility[item.id] ?? item.defaultVisible}
-                      ariaLabel={`Show ${item.title} in tile picker`}
-                      onCheckedChange={(visible) => onTilePickerVisibilityChange(item.id, visible)}
-                    />
-                  </span>
-                </label>
-              );
-            })}
-            {visibleTilePickerItems.length === 0 ? (
-              <div className="picker-empty">No matches</div>
-            ) : null}
-          </div>
-        </section>
+            Refresh
+          </button>
+        </div>
+        <div className="picker-search-row">
+          <input
+            ref={searchRef}
+            className={[
+              "picker-search",
+              activeControlId === "tile-picker-search" && focusPane === "right"
+                ? "settings-input-active"
+                : "",
+            ].join(" ")}
+            value={tilePickerQuery}
+            placeholder="Filter tile types"
+            aria-label="Filter tile types"
+            onFocus={() => setActiveControlId("tile-picker-search")}
+            onChange={(event) => setTilePickerQuery(event.currentTarget.value)}
+          />
+        </div>
+        <div
+          className="selector-options settings-tile-picker-options"
+          role="listbox"
+          aria-label="Tiles"
+        >
+          {visibleTilePickerItems.map((item) => renderTileSettingsItem(item))}
+          {visibleTilePickerItems.length === 0 ? (
+            <div className="picker-empty">No matches</div>
+          ) : null}
+        </div>
       </div>
     );
+  }
+
+  function renderTileSettingsItem(item: ConfigurableTilePickerCatalogItem) {
+    const active = activeControlId === `tile-picker:${item.id}` && focusPane === "right";
+    const expanded = expandedTileSettingsItemId === item.id;
+    const configurable = item.kind === "terminal" || item.kind === "code";
+    return (
+      <div key={item.id} className="settings-tile-config-item">
+        <div
+          className={["selector-option", active ? "selector-option-active" : ""].join(" ")}
+          onMouseEnter={() => setActiveControlId(`tile-picker:${item.id}`)}
+        >
+          <span className="picker-option-icon" aria-hidden="true">
+            {item.icon}
+          </span>
+          <span className="picker-option-copy">
+            <span className="picker-option-title">{item.title}</span>
+            {availabilityDetailForItem(item) ? (
+              <span className="picker-option-detail">{availabilityDetailForItem(item)}</span>
+            ) : null}
+          </span>
+          <span className="settings-row-control settings-tile-config-controls">
+            {configurable ? (
+              <button
+                className="settings-row-action settings-tile-config-button"
+                type="button"
+                aria-expanded={expanded}
+                onClick={() => setExpandedTileSettingsItemId(expanded ? null : item.id)}
+              >
+                {expanded ? "Hide" : "Configure"}
+              </button>
+            ) : null}
+            <Toggle
+              checked={tilePickerVisibility[item.id] ?? item.defaultVisible}
+              ariaLabel={`Show ${item.title} in tile picker`}
+              onCheckedChange={(visible) => onTilePickerVisibilityChange(item.id, visible)}
+            />
+          </span>
+        </div>
+        {expanded ? (
+          <div className="settings-tile-config-panel">{renderTileSettingsPanel(item)}</div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderTileSettingsPanel(item: ConfigurableTilePickerCatalogItem) {
+    if (item.kind === "terminal") return renderTerminalSettingsRows();
+    if (item.kind === "code") {
+      return renderCodeEditorSettingsRows(
+        "tile-code-editor",
+        codeEditorSettings,
+        updateCodeEditorSettings,
+      );
+    }
+    return <div className="settings-detail-empty">No settings for this Tile yet.</div>;
   }
 
   function renderExtensionsDetail() {
@@ -929,50 +1168,45 @@ export function SettingsView({
     );
     return (
       <div className="settings-detail-body settings-extensions-body">
-        <section
-          className="settings-inline-panel settings-detail-panel settings-extensions-panel"
-          aria-label="Extensions settings"
-        >
-          <div className="settings-inline-panel-header settings-extensions-header">
-            <span>
-              Inspect loaded Extension Definitions and diagnostics for the current Workspace scope.
-            </span>
-            <button
-              className={[
-                "settings-integration-refresh-button",
-                activeControlId === "extensions-reload" && focusPane === "right"
-                  ? "settings-button-active"
-                  : "",
-              ].join(" ")}
-              type="button"
-              onMouseEnter={() => setActiveControlId("extensions-reload")}
-              onClick={onReloadExtensions}
-            >
-              Reload Extensions
-            </button>
+        <div className="settings-extensions-toolbar">
+          <span>
+            Inspect loaded Extension Definitions and diagnostics for the current Workspace scope.
+          </span>
+          <button
+            className={[
+              "settings-integration-refresh-button",
+              activeControlId === "extensions-reload" && focusPane === "right"
+                ? "settings-button-active"
+                : "",
+            ].join(" ")}
+            type="button"
+            onMouseEnter={() => setActiveControlId("extensions-reload")}
+            onClick={onReloadExtensions}
+          >
+            Reload Extensions
+          </button>
+        </div>
+        {!extensionSettingsLoaded ? (
+          <div className="settings-extension-empty">Loading extensions…</div>
+        ) : extensions.length === 0 ? (
+          <div className="settings-extension-empty">No Extensions found.</div>
+        ) : (
+          <div className="settings-extension-list">
+            {extensions.map((extension) => renderExtensionCard(extension))}
           </div>
-          {!extensionSettingsLoaded ? (
-            <div className="settings-extension-empty">Loading extensions…</div>
-          ) : extensions.length === 0 ? (
-            <div className="settings-extension-empty">No Extensions found.</div>
-          ) : (
-            <div className="settings-extension-list">
-              {extensions.map((extension) => renderExtensionCard(extension))}
-            </div>
-          )}
-          {extensionSettingsLoaded && globalDiagnostics.length ? (
-            <div className="settings-extension-global-diagnostics">
-              {globalDiagnostics.map((diagnostic) => (
-                <div
-                  className={`settings-extension-diagnostic settings-extension-diagnostic-${diagnostic.severity}`}
-                  key={`${diagnostic.sourceKind}:${diagnostic.extensionId}:${diagnostic.message}`}
-                >
-                  {diagnostic.message}
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </section>
+        )}
+        {extensionSettingsLoaded && globalDiagnostics.length ? (
+          <div className="settings-extension-global-diagnostics">
+            {globalDiagnostics.map((diagnostic) => (
+              <div
+                className={`settings-extension-diagnostic settings-extension-diagnostic-${diagnostic.severity}`}
+                key={`${diagnostic.sourceKind}:${diagnostic.extensionId}:${diagnostic.message}`}
+              >
+                {diagnostic.message}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -1342,6 +1576,84 @@ export function SettingsView({
             ariaLabel={options.title}
             onCheckedChange={options.onChange}
           />
+        </span>
+      </label>
+    );
+  }
+
+  function renderNumberSliderRow(options: {
+    id: string;
+    title: string;
+    description: string;
+    value: number;
+    min: number;
+    max: number;
+    step: number;
+    suffix: string;
+    ariaLabel: string;
+    onChange: (value: number) => void;
+  }) {
+    const active = activeControlId === options.id && focusPane === "right";
+    return (
+      <label
+        className={["settings-row", active ? "settings-row-active" : ""].join(" ")}
+        onMouseEnter={() => setActiveControlId(options.id)}
+        onFocus={() => setActiveControlId(options.id)}
+      >
+        <span className="settings-row-copy">
+          <span className="settings-row-title">{options.title}</span>
+          <span className="settings-row-description">{options.description}</span>
+        </span>
+        <span className="settings-row-control settings-slider-control">
+          <Slider
+            value={options.value}
+            min={options.min}
+            max={options.max}
+            step={options.step}
+            ariaLabel={options.ariaLabel}
+            onValueChange={options.onChange}
+          />
+          <span className="settings-value">
+            {options.value}
+            {options.suffix}
+          </span>
+        </span>
+      </label>
+    );
+  }
+
+  function renderSelectRow(options: {
+    id: string;
+    title: string;
+    description: string;
+    value: string;
+    options: [string, string][];
+    onChange: (value: string) => void;
+  }) {
+    const active = activeControlId === options.id && focusPane === "right";
+    return (
+      <label
+        className={["settings-row", active ? "settings-row-active" : ""].join(" ")}
+        onMouseEnter={() => setActiveControlId(options.id)}
+        onFocus={() => setActiveControlId(options.id)}
+      >
+        <span className="settings-row-copy">
+          <span className="settings-row-title">{options.title}</span>
+          <span className="settings-row-description">{options.description}</span>
+        </span>
+        <span className="settings-row-control">
+          <select
+            className="settings-select-control"
+            value={options.value}
+            onFocus={() => setActiveControlId(options.id)}
+            onChange={(event) => options.onChange(event.currentTarget.value)}
+          >
+            {options.options.map(([value, title]) => (
+              <option key={value} value={value}>
+                {title}
+              </option>
+            ))}
+          </select>
         </span>
       </label>
     );

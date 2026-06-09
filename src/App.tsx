@@ -18,7 +18,6 @@ import {
 } from "./themeRegistry";
 import { commandIdForKeyboardEvent, createCommands, type AppCommandApi } from "./commands";
 import { fileIconForPath } from "./fileIcons";
-import { KeyCap } from "./KeyCap";
 import { Picker, PickerShortcutHint, PickerShortcutSeparator, type PickerItem } from "./Picker";
 import { APP_NAME } from "./appConstants";
 import { resetApplication } from "./applicationClient";
@@ -30,7 +29,11 @@ import {
 } from "./integrationClient";
 import { addProject, listProjects, removeProject } from "./projectClient";
 import { indexProjectFiles } from "./projectFileClient";
-import { createDefaultAppSettings, type AppSettings } from "./settings";
+import {
+  createDefaultAppSettings,
+  normalizeCodeEditorSettings,
+  type AppSettings,
+} from "./settings";
 import { getAppSettings, updateAppSettings, updateProjectSettings } from "./settingsClient";
 import { TerminalTile } from "./TerminalTile";
 import {
@@ -240,7 +243,7 @@ export function App() {
   const [settings, setSettings] = useState<AppSettings>(() => createDefaultAppSettings());
   const {
     debugLayout,
-    terminalFontSize,
+    tileSettings,
     themeId,
     tileHeadersVisible,
     deletionPositiveStatColors,
@@ -867,24 +870,6 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key === "Escape" &&
-        !event.metaKey &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.shiftKey &&
-        layoutRef.current.focusModeTileId &&
-        !tilePickerOpen &&
-        !workspacePickerOpen &&
-        !projectSearchOpen &&
-        !settingsViewOpen
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        commandApi.setFocusModeTileId(() => null);
-        return;
-      }
-
       const workspaceShortcutIndex = workspaceShortcutIndexForKeyboardEvent(event);
       if (workspaceShortcutIndex !== null) {
         event.preventDefault();
@@ -943,8 +928,8 @@ export function App() {
     updateSettings((previous) => ({ ...previous, debugLayout }));
   };
 
-  const setTerminalFontSizeSetting = (terminalFontSize: number) => {
-    updateSettings((previous) => ({ ...previous, terminalFontSize }));
+  const setTileSettings = (tileSettings: AppSettings["tileSettings"]) => {
+    updateSettings((previous) => ({ ...previous, tileSettings }));
   };
 
   const setThemeSetting = (themeId: ThemeId) => {
@@ -1199,9 +1184,17 @@ export function App() {
                       <span className="tile-title-text">{tile.title}</span>
                     </span>
                     {focusMode ? (
-                      <span className="tile-focus-badge">
-                        Focus mode · <KeyCap size="compact">Esc</KeyCap>
-                      </span>
+                      <button
+                        className="tile-focus-close-button"
+                        type="button"
+                        aria-label="Exit focus mode"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={() =>
+                          setLayout((previous) => ({ ...previous, focusModeTileId: null }))
+                        }
+                      >
+                        ×
+                      </button>
                     ) : debugLayout ? (
                       <span className="tile-meta">
                         {tile.x},{tile.y} {tile.w}×{tile.h}
@@ -1224,6 +1217,7 @@ export function App() {
                         active={focused}
                         workspaceId={currentWorkspaceId ?? ""}
                         themeId={resolvedThemeId}
+                        settings={normalizeCodeEditorSettings(tileSettings.codeEditor)}
                         openFileRequest={codeEditorOpenFileRequests[tile.id]}
                       />
                     ) : tile.kind === "tool" && !integrationCatalogLoaded ? (
@@ -1238,7 +1232,7 @@ export function App() {
                         cwd={workspaceRoot}
                         active={focused}
                         launch={terminalLaunchForTile(tile)}
-                        terminalFontSize={terminalFontSize}
+                        terminalFontSize={tileSettings.terminal.fontSize}
                         themeId={resolvedThemeId}
                         onResumeAssigned={(resume) => assignTileResume(tile.id, resume)}
                       />
@@ -1267,8 +1261,8 @@ export function App() {
         <SettingsView
           debugLayout={debugLayout}
           onDebugLayoutChange={setDebugLayoutSetting}
-          terminalFontSize={terminalFontSize}
-          onTerminalFontSizeChange={setTerminalFontSizeSetting}
+          tileSettings={tileSettings}
+          onTileSettingsChange={setTileSettings}
           themeId={themeId}
           onThemeChange={setThemeSetting}
           tileHeadersVisible={tileHeadersVisible}

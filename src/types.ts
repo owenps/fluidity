@@ -39,6 +39,31 @@ export interface WorkspaceStackTile extends BaseTile {
   kind: "workspace";
 }
 
+export type CodeEditorAutoSave = "off" | "onFocusChange" | "afterDelay";
+export type CodeEditorTabTitleMode = "path" | "basename";
+
+export interface CodeEditorSettings {
+  lineNumbersVisible: boolean;
+  minimapVisible: boolean;
+  wordWrap: boolean;
+  fontSize: number;
+  tabSize: number;
+  vimMode: boolean;
+  bracketPairColorization: boolean;
+  stickyScroll: boolean;
+  autoSave: CodeEditorAutoSave;
+  tabTitleMode: CodeEditorTabTitleMode;
+}
+
+export interface TerminalTileSettings {
+  fontSize: number;
+}
+
+export interface TileSettings {
+  terminal: TerminalTileSettings;
+  codeEditor: CodeEditorSettings;
+}
+
 export interface CodeEditorWorkspaceTile extends BaseTile {
   kind: "code";
 }

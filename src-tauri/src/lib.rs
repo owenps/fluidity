@@ -124,10 +124,13 @@ impl Default for PersistedAppState {
 #[serde(rename_all = "camelCase")]
 struct AppSettings {
     debug_layout: bool,
+    #[serde(default = "default_terminal_font_size", skip_serializing)]
     terminal_font_size: f64,
     #[serde(default = "default_theme_id", alias = "codeEditorThemeId")]
     theme_id: String,
     tile_headers_visible: bool,
+    #[serde(default)]
+    tile_settings: TileSettings,
     deletion_positive_stat_colors: bool,
     #[serde(default)]
     tile_picker_visibility: HashMap<String, bool>,
@@ -137,13 +140,122 @@ fn default_theme_id() -> String {
     DEFAULT_THEME_ID.to_string()
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_terminal_font_size() -> f64 {
+    13.0
+}
+
+fn default_code_editor_font_size() -> f64 {
+    13.0
+}
+
+fn default_code_editor_tab_size() -> u32 {
+    2
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TileSettings {
+    #[serde(default)]
+    terminal: TerminalTileSettings,
+    #[serde(default)]
+    code_editor: CodeEditorSettings,
+}
+
+impl Default for TileSettings {
+    fn default() -> Self {
+        Self {
+            terminal: TerminalTileSettings::default(),
+            code_editor: CodeEditorSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalTileSettings {
+    #[serde(default = "default_terminal_font_size")]
+    font_size: f64,
+}
+
+impl Default for TerminalTileSettings {
+    fn default() -> Self {
+        Self {
+            font_size: default_terminal_font_size(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeEditorSettings {
+    #[serde(default = "default_true")]
+    line_numbers_visible: bool,
+    #[serde(default)]
+    minimap_visible: bool,
+    #[serde(default = "default_true")]
+    word_wrap: bool,
+    #[serde(default = "default_code_editor_font_size")]
+    font_size: f64,
+    #[serde(default = "default_code_editor_tab_size")]
+    tab_size: u32,
+    #[serde(default = "default_true")]
+    vim_mode: bool,
+    #[serde(default = "default_true")]
+    bracket_pair_colorization: bool,
+    #[serde(default)]
+    sticky_scroll: bool,
+    #[serde(default)]
+    auto_save: CodeEditorAutoSave,
+    #[serde(default)]
+    tab_title_mode: CodeEditorTabTitleMode,
+}
+
+impl Default for CodeEditorSettings {
+    fn default() -> Self {
+        Self {
+            line_numbers_visible: true,
+            minimap_visible: false,
+            word_wrap: true,
+            font_size: default_code_editor_font_size(),
+            tab_size: default_code_editor_tab_size(),
+            vim_mode: true,
+            bracket_pair_colorization: true,
+            sticky_scroll: false,
+            auto_save: CodeEditorAutoSave::Off,
+            tab_title_mode: CodeEditorTabTitleMode::Path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+enum CodeEditorAutoSave {
+    #[default]
+    Off,
+    OnFocusChange,
+    AfterDelay,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+enum CodeEditorTabTitleMode {
+    #[default]
+    Path,
+    Basename,
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             debug_layout: false,
-            terminal_font_size: 13.0,
+            terminal_font_size: default_terminal_font_size(),
             theme_id: default_theme_id(),
             tile_headers_visible: true,
+            tile_settings: TileSettings::default(),
             deletion_positive_stat_colors: false,
             tile_picker_visibility: HashMap::new(),
         }
@@ -1327,6 +1439,9 @@ fn load_app_state(state_path: &Path) -> PersistedAppState {
     }
 
     app_state.version = APP_STATE_VERSION;
+    if (app_state.settings.terminal_font_size - default_terminal_font_size()).abs() > f64::EPSILON {
+        app_state.settings.tile_settings.terminal.font_size = app_state.settings.terminal_font_size;
+    }
     for workspace in &mut app_state.open_workspaces {
         workspace.tile_state = sanitize_tile_state(workspace.tile_state.clone());
     }

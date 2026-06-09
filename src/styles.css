@@ -528,16 +528,27 @@ body {
   display: flex;
 }
 
-.tile-meta,
-.tile-focus-badge {
+.tile-meta {
   color: var(--muted-foreground);
 }
 
-.tile-focus-badge {
-  display: inline-flex;
+.tile-focus-close-button {
+  display: grid;
   flex: 0 0 auto;
-  align-items: center;
-  gap: 0.35rem;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.tile-focus-close-button:hover {
+  color: var(--foreground);
 }
 
 .tile-body {
@@ -629,9 +640,33 @@ body {
   opacity: 0.5;
 }
 
+.code-editor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .code-editor-tab-active {
   background: var(--code-editor-tab-active-background);
   color: var(--foreground);
+}
+
+.code-editor-tab-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.code-editor-tab-icon .project-file-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.code-editor-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .code-editor-tab-note {
@@ -1811,8 +1846,17 @@ body {
   overflow: auto;
 }
 
-.settings-tile-picker-panel {
-  min-width: 0;
+.settings-tile-picker-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.settings-tiles-body .picker-search-row {
+  padding-left: 0;
 }
 
 .settings-tile-picker-options {
@@ -1820,11 +1864,32 @@ body {
   align-items: start;
   gap: 0.75rem;
   max-height: none;
-  padding: 0.75rem;
 }
 
 .settings-tile-picker-options .selector-option {
   border: 1px solid var(--border);
+}
+
+.settings-tile-config-item {
+  display: grid;
+  min-width: 0;
+}
+
+.settings-tile-config-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.settings-tile-config-button {
+  border: 0;
+  background: transparent;
+}
+
+.settings-tile-config-panel {
+  display: grid;
+  gap: 1px;
+  padding: 0.5rem 0 0;
 }
 
 .selector-option {
@@ -1844,18 +1909,17 @@ body {
 }
 
 .settings-extensions-body {
+  gap: 0.75rem;
   max-width: none;
 }
 
-.settings-extensions-panel {
-  min-width: 0;
-}
-
-.settings-extensions-header {
+.settings-extensions-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 12px;
 }
 
 .settings-extension-list {
@@ -1863,7 +1927,6 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   align-items: start;
   gap: 0.85rem;
-  padding: 0.75rem;
 }
 
 .settings-extension-card {
