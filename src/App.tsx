@@ -9,7 +9,11 @@ import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { CodeEditorTile, type CodeEditorOpenFileRequest } from "./CodeEditorTile";
+import {
+  CodeEditorTile,
+  type CodeEditorController,
+  type CodeEditorOpenFileRequest,
+} from "./CodeEditorTile";
 import {
   applyThemeToDocument,
   onSystemThemeChange,
@@ -44,7 +48,12 @@ import {
 } from "./terminalSessionRuntime";
 import { ToastStack, type AppToast, type ToastSeverity } from "./ToastStack";
 import { WorkspaceTile } from "./WorkspaceTile";
-import { createDefaultTiles, splitFocusedTile, type TileSplitDirection } from "./tileLayout";
+import {
+  closeTile,
+  createDefaultTiles,
+  splitFocusedTile,
+  type TileSplitDirection,
+} from "./tileLayout";
 import {
   createConfigurableTilePickerItems,
   defaultConfigurableTilePickerItems,
@@ -84,6 +93,17 @@ interface LayoutState {
   tiles: Tile[];
   focusedTileId: string | null;
   focusModeTileId: string | null;
+}
+
+type DirtyDisposition = "save" | "discard" | "cancel";
+
+interface DirtyEditorPrompt {
+  title: string;
+  message: string;
+  saveLabel?: string;
+  discardLabel?: string;
+  cancelLabel?: string;
+  resolve: (disposition: DirtyDisposition) => void;
 }
 
 type RecentProjectFilesByWorkspace = Record<string, string[]>;
@@ -254,6 +274,10 @@ export function App() {
   const [codeEditorOpenFileRequests, setCodeEditorOpenFileRequests] = useState<
     Record<string, CodeEditorOpenFileRequest>
   >({});
+  const [dirtyCodeEditorTileIds, setDirtyCodeEditorTileIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [dirtyEditorPrompt, setDirtyEditorPrompt] = useState<DirtyEditorPrompt | null>(null);
   const [settingsViewOpen, setSettingsViewOpen] = useState(false);
   const [settingsViewFocusToken, setSettingsViewFocusToken] = useState(0);
   const [settingsViewInitialCategory, setSettingsViewInitialCategory] = useState<
@@ -285,6 +309,8 @@ export function App() {
     tilePickerVisibility,
   } = settings;
   const layoutRef = useRef(layout);
+  const codeEditorControllersRef = useRef(new Map<string, CodeEditorController>());
+  const dirtyCodeEditorTileIdsRef = useRef(new Set<string>());
   const lastFocusedCodeTileIdRef = useRef<string | null>(null);
   const previousTileRuntimeOwnersRef = useRef<{ workspaceId: string | null; tileIds: Set<string> }>(
     { workspaceId: null, tileIds: new Set() },
@@ -312,13 +338,18 @@ export function App() {
     ) {
       lastFocusedCodeTileIdRef.current = null;
     }
+    const codeTileIds = new Set(
+      layout.tiles.filter((tile) => tile.kind === "code").map((tile) => tile.id),
+    );
     setCodeEditorOpenFileRequests((previous) => {
-      const codeTileIds = new Set(
-        layout.tiles.filter((tile) => tile.kind === "code").map((tile) => tile.id),
-      );
       const nextEntries = Object.entries(previous).filter(([tileId]) => codeTileIds.has(tileId));
       if (nextEntries.length === Object.keys(previous).length) return previous;
       return Object.fromEntries(nextEntries);
+    });
+    setDirtyCodeEditorTileIds((previous) => {
+      const next = new Set([...previous].filter((tileId) => codeTileIds.has(tileId)));
+      dirtyCodeEditorTileIdsRef.current = next;
+      return next.size === previous.size ? previous : next;
     });
   }, [layout]);
 
@@ -426,6 +457,70 @@ export function App() {
       });
     },
     [addToast],
+  );
+
+  const requestDirtyEditorDisposition = useCallback(
+    (options: {
+      title: string;
+      message: string;
+      saveLabel?: string;
+      discardLabel?: string;
+      cancelLabel?: string;
+    }) =>
+      new Promise<DirtyDisposition>((resolve) => {
+        setDirtyEditorPrompt({ ...options, resolve });
+      }),
+    [],
+  );
+
+  const resolveDirtyEditorPrompt = (disposition: DirtyDisposition) => {
+    setDirtyEditorPrompt((prompt) => {
+      prompt?.resolve(disposition);
+      return null;
+    });
+  };
+
+  const setCodeEditorDirtyState = useCallback((tileId: string, dirty: boolean) => {
+    setDirtyCodeEditorTileIds((previous) => {
+      const next = new Set(previous);
+      if (dirty) next.add(tileId);
+      else next.delete(tileId);
+      dirtyCodeEditorTileIdsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const registerCodeEditorController = useCallback(
+    (tileId: string, controller: CodeEditorController | null) => {
+      if (controller) codeEditorControllersRef.current.set(tileId, controller);
+      else codeEditorControllersRef.current.delete(tileId);
+    },
+    [],
+  );
+
+  const guardDirtyCodeEditors = useCallback(
+    async (tileIds: string[], title: string, message: string) => {
+      const dirtyTileIds = tileIds.filter((tileId) =>
+        codeEditorControllersRef.current.get(tileId)?.hasDirty(),
+      );
+      if (!dirtyTileIds.length) return true;
+
+      const disposition = await requestDirtyEditorDisposition({ title, message });
+      if (disposition === "cancel") return false;
+      if (disposition === "discard") {
+        dirtyTileIds.forEach((tileId) =>
+          codeEditorControllersRef.current.get(tileId)?.discardAll(),
+        );
+        return true;
+      }
+
+      for (const tileId of dirtyTileIds) {
+        const saved = await codeEditorControllersRef.current.get(tileId)?.saveAll();
+        if (!saved) return false;
+      }
+      return true;
+    },
+    [requestDirtyEditorDisposition],
   );
 
   const confirmDirtyDeletion = useCallback((confirmation: DirtyConfirmation) => {
@@ -554,8 +649,22 @@ export function App() {
   );
 
   const runAddProject = useCallback(() => {
-    void addProject()
+    const add = async () => {
+      const codeTileIds = layoutRef.current.tiles
+        .filter((tile) => tile.kind === "code")
+        .map((tile) => tile.id);
+      const canAdd = await guardDirtyCodeEditors(
+        codeTileIds,
+        "Add project?",
+        "Code editors have unsaved changes.",
+      );
+      if (!canAdd) return null;
+      return addProject();
+    };
+
+    void add()
       .then((response) => {
+        if (!response) return;
         refreshProjects();
         if (!response.overview.current) return;
 
@@ -577,12 +686,26 @@ export function App() {
           detail: String(error),
         });
       });
-  }, [addToast, addWarningToasts, applyWorkspaceOverview, refreshProjects]);
+  }, [addToast, addWarningToasts, applyWorkspaceOverview, guardDirtyCodeEditors, refreshProjects]);
 
   const runCreateWorkspace = useCallback(
     (projectId: string) => {
-      void createWorkspace({ projectId })
+      const create = async () => {
+        const codeTileIds = layoutRef.current.tiles
+          .filter((tile) => tile.kind === "code")
+          .map((tile) => tile.id);
+        const canCreate = await guardDirtyCodeEditors(
+          codeTileIds,
+          "Create workspace?",
+          "Code editors have unsaved changes.",
+        );
+        if (!canCreate) return null;
+        return createWorkspace({ projectId });
+      };
+
+      void create()
         .then((response) => {
+          if (!response) return;
           applyWorkspaceOverview(response.overview);
           setWorkspacePickerOpen(false);
           setTilePickerOpen(false);
@@ -597,14 +720,33 @@ export function App() {
           });
         });
     },
-    [addToast, addWarningToasts, applyWorkspaceOverview],
+    [addToast, addWarningToasts, applyWorkspaceOverview, guardDirtyCodeEditors],
   );
 
   const runRemoveProject = useCallback(
     (projectId: string) => {
       const finishRemoval = (confirmDirty: boolean) => {
-        void removeProject({ projectId, confirmDirty })
+        const remove = async () => {
+          const removesCurrentWorkspace = openWorkspaces.some(
+            (workspace) => workspace.id === currentWorkspaceId && workspace.projectId === projectId,
+          );
+          if (removesCurrentWorkspace) {
+            const codeTileIds = layoutRef.current.tiles
+              .filter((tile) => tile.kind === "code")
+              .map((tile) => tile.id);
+            const canRemove = await guardDirtyCodeEditors(
+              codeTileIds,
+              "Disconnect project?",
+              "Code editors have unsaved changes.",
+            );
+            if (!canRemove) return null;
+          }
+          return removeProject({ projectId, confirmDirty });
+        };
+
+        void remove()
           .then((response) => {
+            if (!response) return;
             if (response.dirtyConfirmation) {
               if (confirmDirtyDeletion(response.dirtyConfirmation)) {
                 finishRemoval(true);
@@ -636,7 +778,15 @@ export function App() {
 
       finishRemoval(false);
     },
-    [addToast, addWarningToasts, applyWorkspaceOverview, confirmDirtyDeletion],
+    [
+      addToast,
+      addWarningToasts,
+      applyWorkspaceOverview,
+      confirmDirtyDeletion,
+      currentWorkspaceId,
+      guardDirtyCodeEditors,
+      openWorkspaces,
+    ],
   );
 
   const resetClientState = useCallback(() => {
@@ -660,8 +810,22 @@ export function App() {
 
   const runResetApplication = useCallback(() => {
     const finishReset = (confirmDirty: boolean) => {
-      void resetApplication({ confirmDirty })
+      const reset = async () => {
+        const codeTileIds = layoutRef.current.tiles
+          .filter((tile) => tile.kind === "code")
+          .map((tile) => tile.id);
+        const canReset = await guardDirtyCodeEditors(
+          codeTileIds,
+          "Reset application?",
+          "Code editors have unsaved changes.",
+        );
+        if (!canReset) return null;
+        return resetApplication({ confirmDirty });
+      };
+
+      void reset()
         .then((response) => {
+          if (!response) return;
           if (response.dirtyConfirmation) {
             if (confirmDirtyDeletion(response.dirtyConfirmation)) {
               finishReset(true);
@@ -687,40 +851,70 @@ export function App() {
     };
 
     finishReset(false);
-  }, [addToast, addWarningToasts, confirmDirtyDeletion, resetClientState]);
+  }, [addToast, addWarningToasts, confirmDirtyDeletion, guardDirtyCodeEditors, resetClientState]);
 
   const runSwitchWorkspace = useCallback(
     (workspaceId: string) => {
       if (workspaceId === currentWorkspaceId) return;
 
-      const saveCurrentLayout = currentWorkspaceId
-        ? saveWorkspaceTileState({
-            workspaceId: currentWorkspaceId,
-            tileState: { tiles: layoutRef.current.tiles },
-          }).catch(() => {})
-        : Promise.resolve();
+      const switchCurrentWorkspace = async () => {
+        const codeTileIds = layoutRef.current.tiles
+          .filter((tile) => tile.kind === "code")
+          .map((tile) => tile.id);
+        const canSwitch = await guardDirtyCodeEditors(
+          codeTileIds,
+          "Switch workspace?",
+          "Code editors have unsaved changes.",
+        );
+        if (!canSwitch) return;
 
-      void saveCurrentLayout
-        .then(() => switchWorkspace({ workspaceId }))
-        .then((response) => {
-          applyWorkspaceOverview(response.overview);
-        })
-        .catch((error) => {
-          addToast({
-            severity: "error",
-            title: "Could not switch workspace",
-            detail: String(error),
+        const saveCurrentLayout = currentWorkspaceId
+          ? saveWorkspaceTileState({
+              workspaceId: currentWorkspaceId,
+              tileState: { tiles: layoutRef.current.tiles },
+            }).catch(() => {})
+          : Promise.resolve();
+
+        return saveCurrentLayout
+          .then(() => switchWorkspace({ workspaceId }))
+          .then((response) => {
+            applyWorkspaceOverview(response.overview);
+          })
+          .catch((error) => {
+            addToast({
+              severity: "error",
+              title: "Could not switch workspace",
+              detail: String(error),
+            });
           });
-        });
+      };
+
+      void switchCurrentWorkspace();
     },
-    [addToast, applyWorkspaceOverview, currentWorkspaceId],
+    [addToast, applyWorkspaceOverview, currentWorkspaceId, guardDirtyCodeEditors],
   );
 
   const runDiscardWorkspace = useCallback(
     (workspaceId: string) => {
       const finishDiscard = (confirmDirty: boolean) => {
-        void discardWorkspace({ workspaceId, confirmDirty })
+        const discard = async () => {
+          if (workspaceId === currentWorkspaceId) {
+            const codeTileIds = layoutRef.current.tiles
+              .filter((tile) => tile.kind === "code")
+              .map((tile) => tile.id);
+            const canDiscard = await guardDirtyCodeEditors(
+              codeTileIds,
+              "Discard workspace?",
+              "Code editors have unsaved changes.",
+            );
+            if (!canDiscard) return null;
+          }
+          return discardWorkspace({ workspaceId, confirmDirty });
+        };
+
+        void discard()
           .then((response) => {
+            if (!response) return;
             if (response.dirtyConfirmation) {
               if (confirmDirtyDeletion(response.dirtyConfirmation)) {
                 finishDiscard(true);
@@ -750,7 +944,14 @@ export function App() {
 
       finishDiscard(false);
     },
-    [addToast, addWarningToasts, applyWorkspaceOverview, confirmDirtyDeletion],
+    [
+      addToast,
+      addWarningToasts,
+      applyWorkspaceOverview,
+      confirmDirtyDeletion,
+      currentWorkspaceId,
+      guardDirtyCodeEditors,
+    ],
   );
 
   const runDiscardCurrentWorkspace = useCallback(() => {
@@ -840,6 +1041,47 @@ export function App() {
     });
   }, [addToast, refreshExtensionSettings, refreshIntegrationCatalog, refreshToolAvailabilities]);
 
+  const closeFocusedTileGuarded = useCallback(() => {
+    const closingTileId = layoutRef.current.focusedTileId;
+    if (!closingTileId) return;
+    const closeFocused = async () => {
+      const closingTile = layoutRef.current.tiles.find((tile) => tile.id === closingTileId);
+      if (closingTile?.kind === "code") {
+        const canClose = await guardDirtyCodeEditors(
+          [closingTileId],
+          "Close dirty editor?",
+          "This editor has unsaved changes.",
+        );
+        if (!canClose) return;
+      }
+      const result = closeTile(layoutRef.current.tiles, closingTileId);
+      setLayout((previous) => ({
+        ...previous,
+        tiles: result.tiles,
+        focusedTileId: result.focusedTileId,
+        focusModeTileId:
+          previous.focusModeTileId === closingTileId ? null : previous.focusModeTileId,
+      }));
+    };
+    void closeFocused();
+  }, [guardDirtyCodeEditors]);
+
+  const closeFocusedItem = useCallback(() => {
+    const focusedTileId = layoutRef.current.focusedTileId;
+    const focusedTile = layoutRef.current.tiles.find((tile) => tile.id === focusedTileId);
+    if (!focusedTileId || !focusedTile) return;
+    if (focusedTile.kind !== "code") {
+      closeFocusedTileGuarded();
+      return;
+    }
+
+    const closeCodeItem = async () => {
+      const closedTab = await codeEditorControllersRef.current.get(focusedTileId)?.closeActiveTab();
+      if (!closedTab) closeFocusedTileGuarded();
+    };
+    void closeCodeItem();
+  }, [closeFocusedTileGuarded]);
+
   const commandApi = useMemo<AppCommandApi>(
     () => ({
       getState: () => layoutRef.current,
@@ -862,8 +1104,12 @@ export function App() {
       reloadExtensions,
       addProject: runAddProject,
       discardWorkspace: runDiscardCurrentWorkspace,
+      closeFocusedTile: closeFocusedTileGuarded,
+      closeFocusedItem,
     }),
     [
+      closeFocusedItem,
+      closeFocusedTileGuarded,
       openProjectSearch,
       openSettingsView,
       reloadExtensions,
@@ -926,6 +1172,17 @@ export function App() {
 
     return () => window.clearTimeout(saveTimer);
   }, [contextLoaded, currentWorkspaceId, layout.tiles]);
+
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (dirtyCodeEditorTileIdsRef.current.size === 0) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1066,23 +1323,36 @@ export function App() {
     return tiles.find((tile) => tile.kind === "code")?.id ?? null;
   };
 
-  const openProjectFile = (path: string) => {
+  const openProjectFile = (path: string, splitDirection?: TileSplitDirection) => {
     setProjectSearchOpen(false);
-    const existingCodeTileId = codeTileTarget();
+    const existingOpenTile = layoutRef.current.tiles.find(
+      (tile) => tile.kind === "code" && tile.editor?.tabs.some((tab) => tab.path === path),
+    );
     const request = { path, token: Date.now() };
 
-    if (existingCodeTileId) {
-      setCodeEditorOpenFileRequests((previous) => ({ ...previous, [existingCodeTileId]: request }));
-      setLayout((previous) => ({ ...previous, focusedTileId: existingCodeTileId }));
-      lastFocusedCodeTileIdRef.current = existingCodeTileId;
-      return;
+    if (!splitDirection) {
+      const existingCodeTileId = existingOpenTile?.id ?? codeTileTarget();
+      if (existingCodeTileId) {
+        setCodeEditorOpenFileRequests((previous) => ({
+          ...previous,
+          [existingCodeTileId]: request,
+        }));
+        setLayout((previous) => ({ ...previous, focusedTileId: existingCodeTileId }));
+        lastFocusedCodeTileIdRef.current = existingCodeTileId;
+        return;
+      }
     }
 
     const previousTileIds = new Set(layoutRef.current.tiles.map((tile) => tile.id));
-    const result = splitFocusedTile(layoutRef.current.tiles, layoutRef.current.focusedTileId, {
-      kind: "code",
-      title: "Code Editor",
-    });
+    const result = splitFocusedTile(
+      layoutRef.current.tiles,
+      layoutRef.current.focusedTileId,
+      {
+        kind: "code",
+        title: "Code Editor",
+      },
+      splitDirection,
+    );
     const newCodeTile = result.tiles.find(
       (tile) => !previousTileIds.has(tile.id) && tile.kind === "code",
     );
@@ -1255,7 +1525,10 @@ export function App() {
                       <span className="tile-title-icon" aria-hidden="true">
                         {tilePickerItem.icon}
                       </span>
-                      <span className="tile-title-text">{tile.title}</span>
+                      <span className="tile-title-text">
+                        {tile.title}
+                        {dirtyCodeEditorTileIds.has(tile.id) ? " ●" : ""}
+                      </span>
                     </span>
                     {focusMode ? (
                       <button
@@ -1292,8 +1565,38 @@ export function App() {
                         workspaceId={currentWorkspaceId ?? ""}
                         themeId={resolvedThemeId}
                         settings={normalizeCodeEditorSettings(tileSettings.codeEditor)}
+                        editorState={tile.editor}
                         openFileRequest={codeEditorOpenFileRequests[tile.id]}
+                        onEditorStateChange={(editor) => {
+                          setLayout((previous) => {
+                            const currentTile = previous.tiles.find(
+                              (candidate) => candidate.id === tile.id,
+                            );
+                            if (!currentTile || currentTile.kind !== "code") return previous;
+                            if (
+                              JSON.stringify(currentTile.editor ?? null) ===
+                              JSON.stringify(editor ?? null)
+                            ) {
+                              return previous;
+                            }
+                            return {
+                              ...previous,
+                              tiles: previous.tiles.map((candidate) =>
+                                candidate.id === tile.id && candidate.kind === "code"
+                                  ? { ...candidate, editor }
+                                  : candidate,
+                              ),
+                            };
+                          });
+                        }}
                         onFileVisited={recordCurrentWorkspaceFileVisit}
+                        onDirtyStateChange={(dirty) => setCodeEditorDirtyState(tile.id, dirty)}
+                        onRegisterController={(controller) =>
+                          registerCodeEditorController(tile.id, controller)
+                        }
+                        confirmDirty={requestDirtyEditorDisposition}
+                        onToast={addToast}
+                        onOpenFilePicker={openProjectSearch}
                       />
                     ) : tile.kind === "tool" && !integrationCatalogLoaded ? (
                       <div className="tile-placeholder">Loading Integration Tile…</div>
@@ -1331,6 +1634,30 @@ export function App() {
           </div>
         )}
       </section>
+
+      {dirtyEditorPrompt ? (
+        <div className="modal-backdrop">
+          <section className="dirty-editor-modal" role="dialog" aria-modal="true">
+            <h2>{dirtyEditorPrompt.title}</h2>
+            <p>{dirtyEditorPrompt.message}</p>
+            <div className="dirty-editor-modal-actions">
+              <button type="button" onClick={() => resolveDirtyEditorPrompt("discard")}>
+                {dirtyEditorPrompt.discardLabel ?? "Discard"}
+              </button>
+              <button type="button" onClick={() => resolveDirtyEditorPrompt("cancel")}>
+                {dirtyEditorPrompt.cancelLabel ?? "Cancel"}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => resolveDirtyEditorPrompt("save")}
+              >
+                {dirtyEditorPrompt.saveLabel ?? "Save"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {settingsViewOpen ? (
         <SettingsView
@@ -1387,9 +1714,22 @@ export function App() {
           items={projectFileItems}
           emptyQueryItems={recentProjectFileItems}
           maxVisibleItems={10}
-          footer={projectFileIndexLoading ? "Indexing files…" : undefined}
+          footer={
+            projectFileIndexLoading ? (
+              "Indexing files…"
+            ) : (
+              <>
+                <PickerShortcutHint label="Open" keys={["Enter"]} />
+                <PickerShortcutSeparator />
+                <PickerShortcutHint label="Open to side" keys={["⇧", "Enter"]} />
+              </>
+            )
+          }
+          shiftEnterSplitDirection="right"
           onClose={() => setProjectSearchOpen(false)}
-          onSelect={(item: PickerItem) => openProjectFile(item.id)}
+          onSelect={(item: PickerItem, options) =>
+            openProjectFile(item.id, options.alternate ? options.splitDirection : undefined)
+          }
         />
       ) : null}
 

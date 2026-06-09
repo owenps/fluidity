@@ -3,7 +3,6 @@ import type { Direction, Tile } from "./types";
 import {
   canMoveTile,
   canResizeTile,
-  closeTile,
   findTile,
   focusTileInDirection,
   moveTile,
@@ -30,6 +29,8 @@ export interface AppCommandApi {
   reloadExtensions: () => void;
   addProject: () => void;
   discardWorkspace: () => void;
+  closeFocusedTile: () => void;
+  closeFocusedItem: () => void;
 }
 
 export interface Command {
@@ -169,18 +170,17 @@ function behaviorForCommand(commandId: string): Pick<Command, "canRun" | "run"> 
     };
   }
 
+  if (commandId === "focusedItem.close") {
+    return {
+      canRun: requiresFocusedTile,
+      run: (api) => api.closeFocusedItem(),
+    };
+  }
+
   if (commandId === "tile.close") {
     return {
       canRun: requiresFocusedTile,
-      run: (api) => {
-        const closingTileId = api.getState().focusedTileId;
-        const result = closeTile(api.getState().tiles, closingTileId);
-        api.setTiles(() => result.tiles);
-        api.setFocusedTileId(result.focusedTileId);
-        api.setFocusModeTileId((focusModeTileId) =>
-          focusModeTileId === closingTileId ? null : focusModeTileId,
-        );
-      },
+      run: (api) => api.closeFocusedTile(),
     };
   }
 

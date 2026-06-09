@@ -1,13 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
+import "monaco-editor/esm/vs/basic-languages/css/css.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/go/go.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/graphql/graphql.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/html/html.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js";
+import "monaco-editor/esm/vs/language/json/monaco.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/python/python.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/rust/rust.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/shell/shell.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/sql/sql.contribution.js";
 import "monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js";
+import "monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution.js";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import "monaco-editor/min/vs/editor/editor.main.css";
 import { VimMode, initVimMode, type VimAdapterInstance } from "monaco-vim";
 import { registerCodeEditorThemes, type ThemeId } from "./themeRegistry";
-import { readCodeFile, writeCodeFile } from "./codeFileClient";
+import { readCodeFile, statCodeFile, writeCodeFile } from "./codeFileClient";
 import { fileIconForPath } from "./fileIcons";
-import type { CodeEditorSettings } from "./types";
+import { KeyChord } from "./KeyCap";
+import type { ToastSeverity } from "./ToastStack";
+import type { CodeEditorSettings, CodeEditorTileState, CodeEditorViewState } from "./types";
 
 globalThis.MonacoEnvironment = {
   getWorker() {
@@ -18,14 +34,28 @@ globalThis.MonacoEnvironment = {
 const vimWriteEventName = "fluidity://code-editor-write";
 let vimWriteCommandRegistered = false;
 
-interface OpenFileState {
+type DirtyDisposition = "save" | "discard" | "cancel";
+type FileConflict = "external" | "deleted" | null;
+
+interface RuntimeTab {
   path: string;
-  version: string;
+  version: string | null;
+  model: monaco.editor.ITextModel;
+  dirty: boolean;
+  conflict: FileConflict;
+  viewState?: CodeEditorViewState | null;
 }
 
 export interface CodeEditorOpenFileRequest {
   path: string;
   token: number;
+}
+
+export interface CodeEditorController {
+  hasDirty: () => boolean;
+  saveAll: () => Promise<boolean>;
+  discardAll: () => void;
+  closeActiveTab: () => Promise<boolean>;
 }
 
 function registerVimWriteCommand() {
@@ -41,10 +71,47 @@ function registerVimWriteCommand() {
   vimWriteCommandRegistered = true;
 }
 
-function tabTitleForFile(file: OpenFileState | null, mode: CodeEditorSettings["tabTitleMode"]) {
-  const path = file?.path ?? "untitled";
+function tabTitleForPath(path: string, mode: CodeEditorSettings["tabTitleMode"]) {
   if (mode === "path") return path;
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+function modelUriForPath(path: string) {
+  return monaco.Uri.file(path.startsWith("/") ? path : `/${path}`);
+}
+
+function languageIdForPath(path: string) {
+  const normalizedPath = path.toLowerCase();
+  const basename = normalizedPath.split(/[\\/]/).pop() ?? normalizedPath;
+  const extension = basename.includes(".") ? `.${basename.split(".").pop()}` : "";
+  return (
+    monaco.languages
+      .getLanguages()
+      .find(
+        (language) =>
+          language.filenames?.some((filename) => filename.toLowerCase() === basename) ||
+          (extension && language.extensions?.includes(extension)),
+      )?.id ?? "plaintext"
+  );
+}
+
+function viewStateFromEditor(editor: monaco.editor.IStandaloneCodeEditor): CodeEditorViewState {
+  const position = editor.getPosition() ?? { lineNumber: 1, column: 1 };
+  return {
+    cursor: { lineNumber: position.lineNumber, column: position.column },
+    scrollTop: editor.getScrollTop(),
+    scrollLeft: editor.getScrollLeft(),
+  };
+}
+
+function restoreViewState(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  viewState: CodeEditorViewState | null | undefined,
+) {
+  if (!viewState) return;
+  if (viewState.cursor) editor.setPosition(viewState.cursor);
+  if (typeof viewState.scrollTop === "number") editor.setScrollTop(viewState.scrollTop);
+  if (typeof viewState.scrollLeft === "number") editor.setScrollLeft(viewState.scrollLeft);
 }
 
 export function CodeEditorTile({
@@ -52,15 +119,35 @@ export function CodeEditorTile({
   workspaceId,
   themeId,
   settings,
+  editorState,
   openFileRequest,
+  onEditorStateChange,
   onFileVisited,
+  onDirtyStateChange,
+  onRegisterController,
+  confirmDirty,
+  onToast,
+  onOpenFilePicker,
 }: {
   active: boolean;
   workspaceId: string;
   themeId: ThemeId;
   settings: CodeEditorSettings;
+  editorState?: CodeEditorTileState;
   openFileRequest?: CodeEditorOpenFileRequest;
+  onEditorStateChange?: (state: CodeEditorTileState | undefined) => void;
   onFileVisited?: (path: string) => void;
+  onDirtyStateChange?: (dirty: boolean) => void;
+  onRegisterController?: (controller: CodeEditorController | null) => void;
+  confirmDirty?: (options: {
+    title: string;
+    message: string;
+    saveLabel?: string;
+    discardLabel?: string;
+    cancelLabel?: string;
+  }) => Promise<DirtyDisposition>;
+  onToast?: (toast: { severity: ToastSeverity; title: string; detail?: string }) => void;
+  onOpenFilePicker?: () => void;
 }) {
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const statusRef = useRef<HTMLDivElement | null>(null);
@@ -70,42 +157,202 @@ export function CodeEditorTile({
   const workspaceIdRef = useRef(workspaceId);
   const settingsRef = useRef(settings);
   const autoSaveTimerRef = useRef<number | null>(null);
-  const openFileRef = useRef<OpenFileState | null>(null);
+  const tabsRef = useRef<RuntimeTab[]>([]);
+  const activePathRef = useRef<string | null>(null);
   const ignoreContentChangeRef = useRef(false);
   const handledOpenFileRequestTokenRef = useRef<number | null>(null);
-  const [openFile, setOpenFile] = useState<OpenFileState | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const restoredStateKeyRef = useRef<string | null>(null);
+  const onEditorStateChangeRef = useRef(onEditorStateChange);
+  const onDirtyStateChangeRef = useRef(onDirtyStateChange);
+  const onFileVisitedRef = useRef(onFileVisited);
+  const confirmDirtyRef = useRef(confirmDirty);
+  const onToastRef = useRef(onToast);
+  const [, setRevision] = useState(0);
   const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
 
-  const setCurrentOpenFile = (file: OpenFileState | null) => {
-    openFileRef.current = file;
-    setOpenFile(file);
+  const rerender = () => setRevision((revision) => revision + 1);
+  const toast = (severity: ToastSeverity, title: string, detail?: string) => {
+    onToastRef.current?.({ severity, title, detail });
+  };
+  const activeTab = () => tabsRef.current.find((tab) => tab.path === activePathRef.current) ?? null;
+  const dirtyTabs = () => tabsRef.current.filter((tab) => tab.dirty);
+  const reportDirty = () => onDirtyStateChangeRef.current?.(dirtyTabs().length > 0);
+
+  const saveActiveViewState = () => {
+    const editor = editorRef.current;
+    const tab = activeTab();
+    if (editor && tab) tab.viewState = viewStateFromEditor(editor);
   };
 
-  const saveCurrentFile = async () => {
-    const file = openFileRef.current;
+  const serializeState = (): CodeEditorTileState | undefined => {
+    saveActiveViewState();
+    const tabs = tabsRef.current.map((tab) => ({
+      path: tab.path,
+      version: tab.version,
+      viewState: tab.viewState ?? null,
+    }));
+    if (!tabs.length) return undefined;
+    return { tabs, activePath: activePathRef.current ?? tabs[0]?.path ?? null };
+  };
+
+  const publishState = () => {
+    onEditorStateChangeRef.current?.(serializeState());
+    reportDirty();
+  };
+
+  const setActivePath = (path: string | null) => {
     const editor = editorRef.current;
-    if (!file || !editor) {
-      window.alert("Select a file with Cmd+P before saving.");
-      return;
+    saveActiveViewState();
+    activePathRef.current = path;
+    const tab = activeTab();
+    if (editor) {
+      ignoreContentChangeRef.current = true;
+      editor.setModel(tab?.model ?? null);
+      ignoreContentChangeRef.current = false;
+      if (tab) restoreViewState(editor, tab.viewState);
+      editor.focus();
+    }
+    const position = editor?.getPosition();
+    if (position) setCursorPosition(position);
+    publishState();
+    rerender();
+  };
+
+  const addOrUpdateTab = (
+    path: string,
+    contents: string,
+    version: string | null,
+    viewState?: CodeEditorViewState | null,
+  ) => {
+    let tab = tabsRef.current.find((candidate) => candidate.path === path);
+    if (tab) {
+      ignoreContentChangeRef.current = true;
+      tab.model.setValue(contents);
+      ignoreContentChangeRef.current = false;
+      tab.version = version;
+      tab.dirty = false;
+      tab.conflict = null;
+      tab.viewState = viewState ?? tab.viewState;
+    } else {
+      tab = {
+        path,
+        version,
+        model: monaco.editor.createModel(contents, languageIdForPath(path), modelUriForPath(path)),
+        dirty: false,
+        conflict: null,
+        viewState,
+      };
+      tabsRef.current = tabsRef.current.concat(tab);
+    }
+    setActivePath(path);
+    onFileVisitedRef.current?.(path);
+  };
+
+  const reloadTab = async (tab: RuntimeTab): Promise<boolean> => {
+    try {
+      const response = await readCodeFile({ workspaceId: workspaceIdRef.current, path: tab.path });
+      ignoreContentChangeRef.current = true;
+      tab.model.setValue(response.contents);
+      ignoreContentChangeRef.current = false;
+      tab.version = response.version;
+      tab.dirty = false;
+      tab.conflict = null;
+      publishState();
+      rerender();
+      return true;
+    } catch (error) {
+      toast("error", "Reload failed", String(error));
+      return false;
+    }
+  };
+
+  const saveTab = async (tab: RuntimeTab, overwrite = false): Promise<boolean> => {
+    if (tab.conflict && !overwrite) {
+      const disposition = await (confirmDirtyRef.current?.({
+        title: "File changed on disk",
+        message: `${tab.path} changed outside Fluidity.`,
+        saveLabel: "Overwrite",
+        discardLabel: "Reload",
+      }) ?? Promise.resolve("cancel"));
+      if (disposition === "discard") return reloadTab(tab);
+      if (disposition === "save") return saveTab(tab, true);
+      return false;
     }
 
     try {
       const response = await writeCodeFile({
         workspaceId: workspaceIdRef.current,
-        path: file.path,
-        contents: editor.getValue(),
-        expectedVersion: file.version,
+        path: tab.path,
+        contents: tab.model.getValue(),
+        expectedVersion: overwrite ? null : tab.version,
       });
-      setCurrentOpenFile(response);
-      setDirty(false);
+      tab.version = response.version;
+      tab.dirty = false;
+      tab.conflict = null;
+      publishState();
+      rerender();
+      return true;
     } catch (error) {
-      window.alert(`Save failed: ${String(error)}`);
+      const message = String(error);
+      if (message.includes("changed on disk")) {
+        tab.conflict = "external";
+        rerender();
+        return saveTab(tab, false);
+      }
+      toast("error", "Save failed", message);
+      return false;
     }
   };
 
+  const saveCurrentFile = async () => {
+    const tab = activeTab();
+    if (!tab) {
+      toast("info", "Open a file first", "Use Cmd+P to open a project file.");
+      return false;
+    }
+    return saveTab(tab);
+  };
+
+  const saveAll = async () => {
+    for (const tab of dirtyTabs()) {
+      const saved = await saveTab(tab);
+      if (!saved) return false;
+    }
+    return true;
+  };
+
+  const discardAll = () => {
+    tabsRef.current.forEach((tab) => {
+      tab.dirty = false;
+      tab.conflict = null;
+    });
+    publishState();
+    rerender();
+  };
+
+  const closeTab = async (path: string): Promise<boolean> => {
+    const tab = tabsRef.current.find((candidate) => candidate.path === path);
+    if (!tab) return false;
+    if (tab.dirty) {
+      const disposition = await (confirmDirtyRef.current?.({
+        title: "Close dirty tab?",
+        message: `${tab.path} has unsaved changes.`,
+      }) ?? Promise.resolve("cancel"));
+      if (disposition === "cancel") return false;
+      if (disposition === "save" && !(await saveTab(tab))) return false;
+    }
+
+    const wasActive = activePathRef.current === path;
+    tabsRef.current = tabsRef.current.filter((candidate) => candidate.path !== path);
+    tab.model.dispose();
+    if (wasActive) setActivePath(tabsRef.current[0]?.path ?? null);
+    else publishState();
+    rerender();
+    return true;
+  };
+
   const scheduleAutoSave = () => {
-    if (!openFileRef.current) return;
+    if (!activeTab()) return;
     if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = window.setTimeout(() => {
       autoSaveTimerRef.current = null;
@@ -126,6 +373,28 @@ export function CodeEditorTile({
   }, [settings]);
 
   useEffect(() => {
+    onEditorStateChangeRef.current = onEditorStateChange;
+    onDirtyStateChangeRef.current = onDirtyStateChange;
+    onFileVisitedRef.current = onFileVisited;
+    confirmDirtyRef.current = confirmDirty;
+    onToastRef.current = onToast;
+  }, [confirmDirty, onDirtyStateChange, onEditorStateChange, onFileVisited, onToast]);
+
+  useEffect(() => {
+    onRegisterController?.({
+      hasDirty: () => dirtyTabs().length > 0,
+      saveAll,
+      discardAll,
+      closeActiveTab: async () => {
+        const tab = activeTab();
+        if (!tab) return false;
+        return closeTab(tab.path);
+      },
+    });
+    return () => onRegisterController?.(null);
+  });
+
+  useEffect(() => {
     if (!editorHostRef.current) return;
 
     registerCodeEditorThemes(monaco.editor);
@@ -137,7 +406,6 @@ export function CodeEditorTile({
     window.addEventListener(vimWriteEventName, saveActiveEditor);
 
     const editor = monaco.editor.create(editorHostRef.current, {
-      value: "",
       automaticLayout: true,
       cursorBlinking: "smooth",
       fontFamily: "var(--font-mono)",
@@ -161,11 +429,17 @@ export function CodeEditorTile({
 
     const contentDisposable = editor.onDidChangeModelContent(() => {
       if (ignoreContentChangeRef.current) return;
-      setDirty(true);
+      const tab = activeTab();
+      if (!tab) return;
+      tab.dirty = true;
+      reportDirty();
+      rerender();
       if (settingsRef.current.autoSave === "afterDelay") scheduleAutoSave();
     });
     const blurDisposable = editor.onDidBlurEditorWidget(() => {
-      if (settingsRef.current.autoSave === "onFocusChange" && openFileRef.current) {
+      saveActiveViewState();
+      publishState();
+      if (settingsRef.current.autoSave === "onFocusChange" && activeTab()) {
         void saveCurrentFile();
       }
     });
@@ -176,7 +450,9 @@ export function CodeEditorTile({
       id: "fluidity.editorSave",
       label: "Save",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
-      run: () => saveCurrentFile(),
+      run: () => {
+        void saveCurrentFile();
+      },
     });
 
     return () => {
@@ -186,11 +462,11 @@ export function CodeEditorTile({
       cursorDisposable.dispose();
       saveDisposable.dispose();
       window.removeEventListener(vimWriteEventName, saveActiveEditor);
-      const model = editor.getModel();
       vimModeRef.current?.dispose();
       vimModeRef.current = null;
       editor.dispose();
-      model?.dispose();
+      tabsRef.current.forEach((tab) => tab.model.dispose());
+      tabsRef.current = [];
       editorRef.current = null;
     };
   }, []);
@@ -233,27 +509,73 @@ export function CodeEditorTile({
   }, [active]);
 
   useEffect(() => {
+    if (!workspaceId || !editorRef.current) return;
+    const key = `${workspaceId}:${(editorState?.tabs ?? []).map((tab) => tab.path).join("\0")}`;
+    if (restoredStateKeyRef.current === key) return;
+    restoredStateKeyRef.current = key;
+
+    let cancelled = false;
+    const restore = async () => {
+      tabsRef.current.forEach((tab) => tab.model.dispose());
+      tabsRef.current = [];
+      activePathRef.current = null;
+      const persistedTabs = editorState?.tabs ?? [];
+      for (const persistedTab of persistedTabs) {
+        try {
+          const response = await readCodeFile({ workspaceId, path: persistedTab.path });
+          if (cancelled) return;
+          const tab: RuntimeTab = {
+            path: response.path,
+            version: response.version,
+            model: monaco.editor.createModel(
+              response.contents,
+              languageIdForPath(response.path),
+              modelUriForPath(response.path),
+            ),
+            dirty: false,
+            conflict: null,
+            viewState: persistedTab.viewState ?? null,
+          };
+          tabsRef.current = tabsRef.current.concat(tab);
+        } catch (error) {
+          toast("error", "Could not restore editor tab", `${persistedTab.path}: ${String(error)}`);
+        }
+      }
+      const activePath =
+        editorState?.activePath &&
+        tabsRef.current.some((tab) => tab.path === editorState.activePath)
+          ? editorState.activePath
+          : (tabsRef.current[0]?.path ?? null);
+      setActivePath(activePath);
+      reportDirty();
+    };
+
+    void restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [editorState, workspaceId]);
+
+  useEffect(() => {
     if (!openFileRequest || !workspaceId) return;
     if (handledOpenFileRequestTokenRef.current === openFileRequest.token) return;
-    if (dirty && !window.confirm("Discard unsaved editor changes and open another file?")) return;
     handledOpenFileRequestTokenRef.current = openFileRequest.token;
+
+    const existing = tabsRef.current.find((tab) => tab.path === openFileRequest.path);
+    if (existing) {
+      setActivePath(existing.path);
+      onFileVisitedRef.current?.(existing.path);
+      return;
+    }
 
     let cancelled = false;
     const openFile = async () => {
       try {
         const response = await readCodeFile({ workspaceId, path: openFileRequest.path });
         if (cancelled) return;
-        const editor = editorRef.current;
-        if (!editor) return;
-        ignoreContentChangeRef.current = true;
-        editor.setValue(response.contents);
-        ignoreContentChangeRef.current = false;
-        setCurrentOpenFile(response);
-        setDirty(false);
-        onFileVisited?.(response.path);
-        editor.focus();
+        addOrUpdateTab(response.path, response.contents, response.version, null);
       } catch (error) {
-        if (!cancelled) window.alert(`Open failed: ${String(error)}`);
+        if (!cancelled) toast("error", "Open failed", String(error));
       }
     };
 
@@ -261,30 +583,111 @@ export function CodeEditorTile({
     return () => {
       cancelled = true;
     };
-  }, [dirty, onFileVisited, openFileRequest, workspaceId]);
+  }, [openFileRequest, workspaceId]);
 
-  const tabTitle = tabTitleForFile(openFile, settings.tabTitleMode);
+  useEffect(() => {
+    if (!workspaceId) return;
+    const interval = window.setInterval(() => {
+      tabsRef.current.forEach((tab) => {
+        void statCodeFile({ workspaceId, path: tab.path })
+          .then(async (stat) => {
+            if (!stat.exists) {
+              if (tab.conflict !== "deleted") {
+                tab.conflict = "deleted";
+                toast("info", "File deleted outside Fluidity", tab.path);
+                rerender();
+              }
+              return;
+            }
+            if (!stat.version || stat.version === tab.version) return;
+            if (tab.dirty) {
+              if (tab.conflict !== "external") {
+                tab.conflict = "external";
+                toast("info", "File changed outside Fluidity", tab.path);
+                rerender();
+              }
+              return;
+            }
+            const response = await readCodeFile({ workspaceId, path: tab.path });
+            ignoreContentChangeRef.current = true;
+            tab.model.setValue(response.contents);
+            ignoreContentChangeRef.current = false;
+            tab.version = response.version;
+            tab.conflict = null;
+            toast("info", "Reloaded changed file", tab.path);
+            publishState();
+            rerender();
+          })
+          .catch(() => undefined);
+      });
+    }, 2000);
+
+    return () => window.clearInterval(interval);
+  }, [workspaceId]);
+
+  const tabs = tabsRef.current;
+  const currentTab = activeTab();
+
+  const showTabs = settings.tabsVisible && tabs.length > 0;
 
   return (
-    <div className="code-editor-tile">
-      <div className="code-editor-tabstrip" aria-label="Editor tabs">
-        <button
-          className="code-editor-tab code-editor-tab-active"
-          type="button"
-          title={openFile?.path}
-        >
-          <span className="code-editor-tab-icon" aria-hidden="true">
-            {fileIconForPath(openFile?.path ?? "untitled")}
-          </span>
-          <span className="code-editor-tab-title">
-            {tabTitle}
-            {dirty ? " ●" : ""}
-          </span>
-        </button>
+    <div className={["code-editor-tile", showTabs ? "" : "code-editor-tabs-hidden"].join(" ")}>
+      {showTabs ? (
+        <div className="code-editor-tabstrip" aria-label="Editor tabs">
+          {tabs.map((tab) => (
+            <button
+              key={tab.path}
+              className={[
+                "code-editor-tab",
+                tab.path === activePathRef.current ? "code-editor-tab-active" : "",
+                tab.conflict ? "code-editor-tab-conflict" : "",
+              ].join(" ")}
+              type="button"
+              title={tab.path}
+              onClick={() => setActivePath(tab.path)}
+            >
+              <span className="code-editor-tab-icon" aria-hidden="true">
+                {fileIconForPath(tab.path)}
+              </span>
+              <span className="code-editor-tab-title">
+                {tabTitleForPath(tab.path, settings.tabTitleMode)}
+                {tab.dirty ? " ●" : ""}
+                {tab.conflict ? " ⚠" : ""}
+              </span>
+              <span
+                className="code-editor-tab-close"
+                role="button"
+                tabIndex={-1}
+                aria-label={`Close ${tab.path}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void closeTab(tab.path);
+                }}
+              >
+                ×
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="code-editor-host-wrap">
+        <div ref={editorHostRef} className="code-editor-host" />
+        {tabs.length === 0 ? (
+          <button className="code-editor-empty-state" type="button" onClick={onOpenFilePicker}>
+            <span>Open file</span>
+            <KeyChord keys={["⌘", "P"]} size="compact" />
+          </button>
+        ) : null}
       </div>
-      <div ref={editorHostRef} className="code-editor-host" />
       <div className="code-editor-statusline">
         <div ref={statusRef} className="code-editor-vim-status" />
+        <span className="code-editor-tab-note">
+          {currentTab?.conflict === "external"
+            ? "changed on disk"
+            : currentTab?.conflict === "deleted"
+              ? "deleted on disk"
+              : currentTab?.path}
+        </span>
         <span className="code-editor-cursor-position">
           {cursorPosition.lineNumber}:{cursorPosition.column}
         </span>

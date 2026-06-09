@@ -212,6 +212,8 @@ struct CodeEditorSettings {
     auto_save: CodeEditorAutoSave,
     #[serde(default)]
     tab_title_mode: CodeEditorTabTitleMode,
+    #[serde(default = "default_true")]
+    tabs_visible: bool,
 }
 
 impl Default for CodeEditorSettings {
@@ -227,6 +229,7 @@ impl Default for CodeEditorSettings {
             sticky_scroll: false,
             auto_save: CodeEditorAutoSave::Off,
             tab_title_mode: CodeEditorTabTitleMode::Path,
+            tabs_visible: true,
         }
     }
 }
@@ -317,6 +320,8 @@ struct PersistedTile {
     id: String,
     kind: String,
     title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    editor: Option<CodeEditorTileState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     extension_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -378,6 +383,59 @@ struct CodeFileWriteRequest {
 struct CodeFileWriteResponse {
     path: String,
     version: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeFileStatRequest {
+    workspace_id: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeFileStatResponse {
+    path: String,
+    exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeEditorTileState {
+    #[serde(default)]
+    tabs: Vec<CodeEditorTabState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeEditorTabState {
+    path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    view_state: Option<CodeEditorViewState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeEditorViewState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cursor: Option<CodeEditorCursor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scroll_top: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scroll_left: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeEditorCursor {
+    line_number: u32,
+    column: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1030,6 +1088,36 @@ fn code_file_write(
 }
 
 #[tauri::command]
+fn code_file_stat(
+    state: State<'_, WorkspaceState>,
+    request: CodeFileStatRequest,
+) -> Result<CodeFileStatResponse, String> {
+    let target = workspace_file_path(&state, &request.workspace_id, &request.path, false)?;
+    match fs::metadata(&target) {
+        Ok(metadata) => {
+            if !metadata.is_file() {
+                return Ok(CodeFileStatResponse {
+                    path: request.path,
+                    exists: false,
+                    version: None,
+                });
+            }
+            Ok(CodeFileStatResponse {
+                path: request.path,
+                exists: true,
+                version: Some(file_version(&metadata)?),
+            })
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(CodeFileStatResponse {
+            path: request.path,
+            exists: false,
+            version: None,
+        }),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
 fn project_file_index(
     state: State<'_, WorkspaceState>,
     request: ProjectFileIndexRequest,
@@ -1234,6 +1322,7 @@ pub fn run() {
             workspace_tile_state_save,
             code_file_read,
             code_file_write,
+            code_file_stat,
             project_file_index,
             application_reset,
             terminal_create,
@@ -1782,6 +1871,7 @@ fn default_workspace_tile_state() -> WorkspaceTileState {
                 id: format!("tile-{}", Uuid::new_v4()),
                 kind: "terminal".to_string(),
                 title: "Terminal".to_string(),
+                editor: None,
                 extension_id: None,
                 integration_id: None,
                 integration_tile_id: None,
@@ -1797,6 +1887,7 @@ fn default_workspace_tile_state() -> WorkspaceTileState {
                 id: format!("tile-{}", Uuid::new_v4()),
                 kind: "workspace".to_string(),
                 title: "Workspaces".to_string(),
+                editor: None,
                 extension_id: None,
                 integration_id: None,
                 integration_tile_id: None,
@@ -1830,6 +1921,12 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
         tile.resume = sanitize_resume_metadata(tile.resume);
         let legacy_tool_id = tile.tool_id.take();
         let legacy_initial_command = tile.initial_command.take();
+
+        if tile.kind != "code" {
+            tile.editor = None;
+        } else {
+            tile.editor = sanitize_code_editor_state(tile.editor.take());
+        }
 
         if tile.kind == "terminal" {
             if let Some(tool_tile) = legacy_tool_integration_tile(
@@ -1890,6 +1987,31 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
     } else {
         WorkspaceTileState { tiles }
     }
+}
+
+fn sanitize_code_editor_state(editor: Option<CodeEditorTileState>) -> Option<CodeEditorTileState> {
+    let mut editor = editor?;
+    let mut seen = HashSet::new();
+    editor.tabs.retain(|tab| {
+        let path = Path::new(tab.path.trim());
+        !tab.path.trim().is_empty()
+            && !path.is_absolute()
+            && path
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)))
+            && seen.insert(tab.path.clone())
+    });
+    if editor.tabs.is_empty() {
+        return None;
+    }
+    if !editor
+        .active_path
+        .as_ref()
+        .is_some_and(|active_path| editor.tabs.iter().any(|tab| &tab.path == active_path))
+    {
+        editor.active_path = editor.tabs.first().map(|tab| tab.path.clone());
+    }
+    Some(editor)
 }
 
 fn is_valid_tile_geometry(tile: &PersistedTile) -> bool {
@@ -3976,6 +4098,7 @@ mod tests {
                 id: "tile-unresolved".to_string(),
                 kind: "tool".to_string(),
                 title: "Missing Agent".to_string(),
+                editor: None,
                 extension_id: Some("example.missing".to_string()),
                 integration_id: Some("missing-agent".to_string()),
                 integration_tile_id: Some("cli".to_string()),
@@ -4431,6 +4554,7 @@ mod tests {
             id: "tile-test".to_string(),
             kind: "terminal".to_string(),
             title: "Test".to_string(),
+            editor: None,
             extension_id: None,
             integration_id: None,
             integration_tile_id: None,
@@ -4449,6 +4573,7 @@ mod tests {
             id: "tile-test".to_string(),
             kind: "tool".to_string(),
             title: "".to_string(),
+            editor: None,
             extension_id: None,
             integration_id: None,
             integration_tile_id: None,

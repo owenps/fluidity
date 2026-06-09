@@ -76,6 +76,17 @@
     }
   },
   {
+    "id": "focusedItem.close",
+    "title": "Close Focused Item",
+    "shortcutGroup": "Tiles",
+    "shortcut": {
+      "key": "w",
+      "meta": true,
+      "displayKeys": ["⌘", "W"]
+    },
+    "nativeAccelerator": "Cmd+W"
+  },
+  {
     "id": "tile.close",
     "title": "Close Tile",
     "shortcutGroup": "Tiles",

@@ -604,6 +604,10 @@ body {
   color: var(--code-editor-foreground);
 }
 
+.code-editor-tabs-hidden {
+  grid-template-rows: minmax(0, 1fr) 24px;
+}
+
 .code-editor-tabstrip {
   display: flex;
   align-items: stretch;
@@ -646,6 +650,24 @@ body {
   gap: 0.4rem;
 }
 
+.code-editor-tab-conflict {
+  color: var(--destructive);
+}
+
+.code-editor-tab-close {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--code-editor-muted-foreground);
+}
+
+.code-editor-tab-close:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
 .code-editor-tab-active {
   background: var(--code-editor-tab-active-background);
   color: var(--foreground);
@@ -679,9 +701,36 @@ body {
   white-space: nowrap;
 }
 
-.code-editor-host {
+.code-editor-host-wrap {
+  position: relative;
   min-height: 0;
   min-width: 0;
+}
+
+.code-editor-host {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.code-editor-empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--code-editor-muted-foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.code-editor-empty-state:hover {
+  color: var(--foreground);
 }
 
 .code-editor-statusline {
@@ -1247,6 +1296,34 @@ body {
   display: grid;
   place-items: center;
   background: rgb(0 0 0 / 0.35);
+}
+
+.dirty-editor-modal {
+  width: min(420px, calc(100vw - 2rem));
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.25);
+}
+
+.dirty-editor-modal h2 {
+  margin: 0 0 0.5rem;
+  font-size: var(--font-size-lg);
+}
+
+.dirty-editor-modal p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--font-size-sm);
+}
+
+.dirty-editor-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
 }
 
 .settings-view {

@@ -12,6 +12,7 @@ export interface PickerItem {
 
 export interface PickerSelectOptions {
   splitDirection: "right" | "down";
+  alternate?: boolean;
 }
 
 interface PickerProps {
@@ -20,6 +21,7 @@ interface PickerProps {
   emptyQueryItems?: PickerItem[];
   maxVisibleItems?: number;
   footer?: ReactNode;
+  shiftEnterSplitDirection?: PickerSelectOptions["splitDirection"];
   onSelect: (item: PickerItem, options: PickerSelectOptions) => void;
   onClose: () => void;
 }
@@ -66,6 +68,7 @@ export function Picker({
   emptyQueryItems,
   maxVisibleItems,
   footer,
+  shiftEnterSplitDirection = "down",
   onSelect,
   onClose,
 }: PickerProps) {
@@ -99,7 +102,7 @@ export function Picker({
 
   const selectItem = (
     item: PickerItem,
-    options: PickerSelectOptions = { splitDirection: "right" },
+    options: PickerSelectOptions = { splitDirection: "right", alternate: false },
   ) => {
     if (item.disabled) return;
     onSelect(item, options);
@@ -140,7 +143,12 @@ export function Picker({
           if (event.key === "Enter" && activeItemId) {
             event.preventDefault();
             const item = enabledItems.find((candidate) => candidate.id === activeItemId);
-            if (item) selectItem(item, { splitDirection: event.shiftKey ? "down" : "right" });
+            if (item) {
+              selectItem(item, {
+                splitDirection: event.shiftKey ? shiftEnterSplitDirection : "right",
+                alternate: event.shiftKey,
+              });
+            }
           }
         }}
       >

@@ -53,6 +53,7 @@ export interface CodeEditorSettings {
   stickyScroll: boolean;
   autoSave: CodeEditorAutoSave;
   tabTitleMode: CodeEditorTabTitleMode;
+  tabsVisible: boolean;
 }
 
 export interface TerminalTileSettings {
@@ -64,8 +65,26 @@ export interface TileSettings {
   codeEditor: CodeEditorSettings;
 }
 
+export interface CodeEditorViewState {
+  cursor?: { lineNumber: number; column: number };
+  scrollTop?: number;
+  scrollLeft?: number;
+}
+
+export interface CodeEditorTabState {
+  path: string;
+  version?: string | null;
+  viewState?: CodeEditorViewState | null;
+}
+
+export interface CodeEditorTileState {
+  tabs: CodeEditorTabState[];
+  activePath?: string | null;
+}
+
 export interface CodeEditorWorkspaceTile extends BaseTile {
   kind: "code";
+  editor?: CodeEditorTileState;
 }
 
 export type Tile =
@@ -235,6 +254,17 @@ export interface CodeFileWriteRequest {
 export interface CodeFileWriteResponse {
   path: string;
   version: string;
+}
+
+export interface CodeFileStatRequest {
+  workspaceId: string;
+  path: string;
+}
+
+export interface CodeFileStatResponse {
+  path: string;
+  exists: boolean;
+  version?: string | null;
 }
 
 export interface ProjectFileIndexRequest {

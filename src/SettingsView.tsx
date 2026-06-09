@@ -147,6 +147,7 @@ function codeEditorControlIds(prefix: string) {
     `${prefix}:bracket-pair-colorization`,
     `${prefix}:sticky-scroll`,
     `${prefix}:auto-save`,
+    `${prefix}:tabs-visible`,
     `${prefix}:tab-title-mode`,
   ];
 }
@@ -507,6 +508,7 @@ export function SettingsView({
       updateCodeEditorSettings({ bracketPairColorization: !current.bracketPairColorization });
     }
     if (key === "sticky-scroll") updateCodeEditorSettings({ stickyScroll: !current.stickyScroll });
+    if (key === "tabs-visible") updateCodeEditorSettings({ tabsVisible: !current.tabsVisible });
   };
 
   const activateControl = () => {
@@ -1082,6 +1084,13 @@ export function SettingsView({
           ],
           onChange: (autoSave) =>
             onChange({ autoSave: autoSave as CodeEditorSettings["autoSave"] }),
+        })}
+        {renderToggleRow({
+          id: `${prefix}:tabs-visible`,
+          title: "Tabs",
+          description: "Show the Code Editor tab strip.",
+          checked: value.tabsVisible,
+          onChange: (tabsVisible) => onChange({ tabsVisible }),
         })}
         {renderSelectRow({
           id: `${prefix}:tab-title-mode`,

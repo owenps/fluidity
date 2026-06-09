@@ -51,6 +51,7 @@ export function createDefaultCodeEditorSettings(): CodeEditorSettings {
     stickyScroll: false,
     autoSave: "off",
     tabTitleMode: "path",
+    tabsVisible: true,
   };
 }
 
@@ -86,6 +87,7 @@ export function normalizeCodeEditorSettings(
         ? value.autoSave
         : defaults.autoSave,
     tabTitleMode: value?.tabTitleMode === "basename" ? "basename" : defaults.tabTitleMode,
+    tabsVisible: typeof value?.tabsVisible === "boolean" ? value.tabsVisible : defaults.tabsVisible,
   };
 }
 
