@@ -98,6 +98,10 @@ function projectSort(left: RegisteredProject, right: RegisteredProject) {
   return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
 }
 
+function workspaceBranchPrefixPreview(prefix: string) {
+  return `${prefix.trim()}willow`;
+}
+
 function sortedTilePickerConfigurationItems(
   items: ConfigurableTilePickerCatalogItem[],
   visibility: TilePickerVisibility,
@@ -925,7 +929,8 @@ export function SettingsView({
         <span className="settings-row-copy">
           <span className="settings-row-title">Workspace Branch Prefix</span>
           <span className="settings-row-description">
-            Prepended to generated Workspace Branch names. Example: owenps/
+            Prepended to generated Workspace Branch names. Preview:{" "}
+            {workspaceBranchPrefixPreview(workspaceBranchPrefix)}
           </span>
         </span>
         <span className="settings-row-control">
@@ -1512,6 +1517,7 @@ export function SettingsView({
   function renderProjectWorkspaceBranchPrefixControl() {
     if (!selectedProject || selectedProject.kind !== "git") return null;
     const active = activeControlId === "project-workspace-branch-prefix" && focusPane === "right";
+    const effectivePrefix = selectedProject.settings.workspaceBranchPrefix ?? workspaceBranchPrefix;
 
     return (
       <label
@@ -1521,7 +1527,7 @@ export function SettingsView({
         <span className="settings-row-copy">
           <span className="settings-row-title">Workspace Branch Prefix</span>
           <span className="settings-row-description">
-            Project override. Leave empty to use global prefix ({workspaceBranchPrefix || "none"}).
+            Project override. Preview: {workspaceBranchPrefixPreview(effectivePrefix)}
           </span>
         </span>
         <span className="settings-row-control">
