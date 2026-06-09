@@ -51,7 +51,9 @@ jobs:
           version="${RELEASE_TAG#v}"
           package_version="$(node -p "require('./package.json').version")"
           tauri_version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          cargo_version="$(sed -n 's/^version = "\\(.*\\)"/\\1/p' src-tauri/Cargo.toml | head -1)"
+          cargo_version="$(awk -F'\"' '/^version = / { print $2; exit }' src-tauri/Cargo.toml)"
+
+          echo "tag=$version package=$package_version tauri=$tauri_version cargo=$cargo_version"
 
           test "$version" = "$package_version"
           test "$version" = "$tauri_version"
