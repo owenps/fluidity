@@ -99,7 +99,7 @@ function projectSort(left: RegisteredProject, right: RegisteredProject) {
 }
 
 function workspaceBranchPrefixPreview(prefix: string) {
-  return `${prefix.trim()}generated-name`;
+  return `${prefix.trim()}task`;
 }
 
 function sortedTilePickerConfigurationItems(
