@@ -86,6 +86,37 @@ interface LayoutState {
   focusModeTileId: string | null;
 }
 
+type RecentProjectFilesByWorkspace = Record<string, string[]>;
+
+const maxRecentProjectFiles = 10;
+const recentProjectFilesStorageKey = "fluidity.recentProjectFilesByWorkspace";
+
+function loadRecentProjectFilesByWorkspace(): RecentProjectFilesByWorkspace {
+  try {
+    const value = window.localStorage.getItem(recentProjectFilesStorageKey);
+    const parsed = value ? JSON.parse(value) : null;
+    if (!parsed || typeof parsed !== "object") return {};
+
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .filter((entry): entry is [string, string[]] =>
+          Array.isArray(entry[1]) && entry[1].every((path) => typeof path === "string"),
+        )
+        .map(([workspaceId, paths]) => [workspaceId, paths.slice(0, maxRecentProjectFiles)]),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function storeRecentProjectFilesByWorkspace(filesByWorkspace: RecentProjectFilesByWorkspace) {
+  try {
+    window.localStorage.setItem(recentProjectFilesStorageKey, JSON.stringify(filesByWorkspace));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function createInitialLayout(): LayoutState {
   return createLayoutFromTiles(createDefaultTiles());
 }
@@ -216,6 +247,8 @@ export function App() {
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
   const [projectFileItems, setProjectFileItems] = useState<PickerItem[]>([]);
+  const [recentProjectFilesByWorkspace, setRecentProjectFilesByWorkspace] =
+    useState<RecentProjectFilesByWorkspace>(() => loadRecentProjectFilesByWorkspace());
   const [projectFileIndexLoading, setProjectFileIndexLoading] = useState(false);
   const [codeEditorOpenFileRequests, setCodeEditorOpenFileRequests] = useState<
     Record<string, CodeEditorOpenFileRequest>
@@ -619,6 +652,8 @@ export function App() {
     setProjectSearchOpen(false);
     setSettingsViewOpen(false);
     setSettingsViewInitialCategory(null);
+    setRecentProjectFilesByWorkspace({});
+    storeRecentProjectFilesByWorkspace({});
   }, []);
 
   const runResetApplication = useCallback(() => {
@@ -761,6 +796,28 @@ export function App() {
     setSettingsViewOpen(false);
     loadProjectFileIndex();
   }, [addToast, currentWorkspaceId, loadProjectFileIndex]);
+
+  const recordRecentProjectFile = useCallback((workspaceId: string | null, path: string) => {
+    if (!workspaceId) return;
+
+    setRecentProjectFilesByWorkspace((previous) => {
+      const previousPaths = previous[workspaceId] ?? [];
+      const nextPaths = [
+        path,
+        ...previousPaths.filter((candidatePath) => candidatePath !== path),
+      ].slice(0, maxRecentProjectFiles);
+      if (nextPaths.join("\0") === previousPaths.join("\0")) return previous;
+
+      const next = { ...previous, [workspaceId]: nextPaths };
+      storeRecentProjectFilesByWorkspace(next);
+      return next;
+    });
+  }, []);
+
+  const recordCurrentWorkspaceFileVisit = useCallback(
+    (path: string) => recordRecentProjectFile(currentWorkspaceId, path),
+    [currentWorkspaceId, recordRecentProjectFile],
+  );
 
   const openSettingsView = useCallback((category?: "extensions") => {
     setSettingsViewInitialCategory(category ?? null);
@@ -1084,6 +1141,17 @@ export function App() {
       toolAvailabilityLoaded,
     ],
   );
+  const recentProjectFileItems = useMemo<PickerItem[]>(() => {
+    if (!currentWorkspaceId) return [];
+    return (recentProjectFilesByWorkspace[currentWorkspaceId] ?? []).map((path) => ({
+      id: path,
+      title: path,
+      icon: fileIconForPath(path),
+      searchText: path,
+      detail: "Recent",
+    }));
+  }, [currentWorkspaceId, recentProjectFilesByWorkspace]);
+
   const workspacePickerItems = useMemo<PickerItem[]>(() => {
     const projects = [...registeredProjects].sort((left, right) => {
       if (left.root === context?.project.root) return -1;
@@ -1219,6 +1287,7 @@ export function App() {
                         themeId={resolvedThemeId}
                         settings={normalizeCodeEditorSettings(tileSettings.codeEditor)}
                         openFileRequest={codeEditorOpenFileRequests[tile.id]}
+                        onFileVisited={recordCurrentWorkspaceFileVisit}
                       />
                     ) : tile.kind === "tool" && !integrationCatalogLoaded ? (
                       <div className="tile-placeholder">Loading Integration Tile…</div>
@@ -1308,6 +1377,7 @@ export function App() {
         <Picker
           title="Search Project Files"
           items={projectFileItems}
+          emptyQueryItems={recentProjectFileItems}
           maxVisibleItems={10}
           footer={projectFileIndexLoading ? "Indexing files…" : undefined}
           onClose={() => setProjectSearchOpen(false)}

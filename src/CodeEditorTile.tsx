@@ -53,12 +53,14 @@ export function CodeEditorTile({
   themeId,
   settings,
   openFileRequest,
+  onFileVisited,
 }: {
   active: boolean;
   workspaceId: string;
   themeId: ThemeId;
   settings: CodeEditorSettings;
   openFileRequest?: CodeEditorOpenFileRequest;
+  onFileVisited?: (path: string) => void;
 }) {
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const statusRef = useRef<HTMLDivElement | null>(null);
@@ -248,6 +250,7 @@ export function CodeEditorTile({
         ignoreContentChangeRef.current = false;
         setCurrentOpenFile(response);
         setDirty(false);
+        onFileVisited?.(response.path);
         editor.focus();
       } catch (error) {
         if (!cancelled) window.alert(`Open failed: ${String(error)}`);
@@ -258,7 +261,7 @@ export function CodeEditorTile({
     return () => {
       cancelled = true;
     };
-  }, [dirty, openFileRequest, workspaceId]);
+  }, [dirty, onFileVisited, openFileRequest, workspaceId]);
 
   const tabTitle = tabTitleForFile(openFile, settings.tabTitleMode);
 

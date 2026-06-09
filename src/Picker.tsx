@@ -17,6 +17,7 @@ export interface PickerSelectOptions {
 interface PickerProps {
   title: string;
   items: PickerItem[];
+  emptyQueryItems?: PickerItem[];
   maxVisibleItems?: number;
   footer?: ReactNode;
   onSelect: (item: PickerItem, options: PickerSelectOptions) => void;
@@ -59,18 +60,29 @@ function pickerItemScore(item: PickerItem, query: string): number | null {
   return score;
 }
 
-export function Picker({ title, items, maxVisibleItems, footer, onSelect, onClose }: PickerProps) {
+export function Picker({
+  title,
+  items,
+  emptyQueryItems,
+  maxVisibleItems,
+  footer,
+  onSelect,
+  onClose,
+}: PickerProps) {
   const [query, setQuery] = useState("");
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return maxVisibleItems ? items.slice(0, maxVisibleItems) : items;
+    if (!normalizedQuery) {
+      const emptyItems = emptyQueryItems ?? items;
+      return maxVisibleItems ? emptyItems.slice(0, maxVisibleItems) : emptyItems;
+    }
     const matches = items
       .map((item) => ({ item, score: pickerItemScore(item, normalizedQuery) }))
       .filter((result): result is { item: PickerItem; score: number } => result.score !== null)
       .sort((left, right) => left.score - right.score)
       .map((result) => result.item);
     return maxVisibleItems ? matches.slice(0, maxVisibleItems) : matches;
-  }, [items, maxVisibleItems, query]);
+  }, [emptyQueryItems, items, maxVisibleItems, query]);
   const enabledItems = useMemo(() => visibleItems.filter((item) => !item.disabled), [visibleItems]);
   const [activeItemId, setActiveItemId] = useState<string | null>(enabledItems[0]?.id ?? null);
   const rootRef = useRef<HTMLElement | null>(null);
