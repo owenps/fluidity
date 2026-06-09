@@ -613,7 +613,15 @@ body {
   --diff-tile-deletion-fg: var(--git-deletion-foreground);
   --diff-tile-deletion-bg: rgb(248 81 73 / 0.13);
   --diff-tile-deletion-bg-emphasis: rgb(248 81 73 / 0.23);
+  --diff-tile-stat-addition-fg: var(--diff-tile-addition-fg);
+  --diff-tile-stat-deletion-fg: var(--diff-tile-deletion-fg);
+  --diffs-font-size: var(--font-size-sm);
+  --diffs-line-height: 20px;
+  --diffs-header-font-family: var(--font-sans);
+  --diffs-font-family: var(--font-mono);
 
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid var(--border);
   background: var(--background);
   color: var(--foreground);
@@ -629,6 +637,8 @@ body {
 }
 
 .diff-tile-colors-reversed {
+  --diff-tile-stat-addition-fg: var(--diff-tile-deletion-fg);
+  --diff-tile-stat-deletion-fg: var(--diff-tile-addition-fg);
   --diffs-addition-color-override: var(--diff-tile-deletion-fg);
   --diffs-deletion-color-override: var(--diff-tile-addition-fg);
   --diffs-bg-addition-override: var(--diff-tile-deletion-bg);
@@ -641,18 +651,281 @@ body {
   --diffs-fg-number-deletion-override: var(--diff-tile-addition-fg);
 }
 
+.diff-tile:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.diff-tile-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  min-height: 28px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 92%, var(--muted));
+}
+
+.diff-review-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-right: auto;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.diff-review-progress-label {
+  flex: 0 0 auto;
+}
+
+.diff-review-progress-track {
+  position: relative;
+  display: block;
+  width: 72px;
+  height: 4px;
+  overflow: hidden;
+  background: var(--muted);
+}
+
+.diff-review-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--muted-foreground);
+}
+
+.diff-toolbar-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  padding: 0;
+}
+
+.diff-toolbar-icon {
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+}
+
+.diff-toolbar-icon-unified {
+  mask: url("./assets/diff-view-unified.svg") center / contain no-repeat;
+}
+
+.diff-toolbar-icon-split {
+  mask: url("./assets/diff-view-split.svg") center / contain no-repeat;
+}
+
+.diff-toolbar-icon-whitespace {
+  mask: url("./assets/whitespace.svg") center / contain no-repeat;
+}
+
+.diff-toolbar-icon-button:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.diff-toolbar-icon-button-active {
+  border-color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--muted-foreground) 18%, var(--background));
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--muted-foreground) 28%, transparent);
+}
+
+.diff-toolbar-icon-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .diff-tile-content {
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 38%, transparent) transparent;
+}
+
+.diff-tile-content::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.diff-tile-content::-webkit-scrollbar-track,
+.diff-tile-content::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.diff-tile-content::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted-foreground) 34%, transparent);
+  background-clip: content-box;
+}
+
+.diff-tile-content::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted-foreground) 52%, transparent);
+  background-clip: content-box;
 }
 
 .diff-tile-content .diffs-container {
   min-height: 100%;
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
+}
+
+.diff-tile-content [data-diffs-header="default"],
+.diff-tile-content [data-diffs-header="custom"] {
+  min-height: 32px;
+  padding-inline: 0;
+  font-size: var(--font-size-sm);
+  line-height: 18px;
+}
+
+.diff-tile-content [data-diffs-header="custom"] {
+  display: flex;
+  align-items: center;
+}
+
+.diff-tile-content [slot="header-custom"] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.diff-tile-content [data-change-icon] {
+  display: none;
+}
+
+.diff-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding-inline: 8px;
+  cursor: pointer;
+}
+
+.diff-file-header-main,
+.diff-file-header-meta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.diff-file-header-main {
+  flex: 1 1 auto;
+  gap: 0.35rem;
+}
+
+.diff-file-header-meta {
+  flex: 0 0 auto;
+  gap: 0.55rem;
+}
+
+.diff-file-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-file-stat {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.diff-file-stat-additions {
+  color: var(--diff-tile-stat-addition-fg);
+}
+
+.diff-file-stat-deletions {
+  color: var(--diff-tile-stat-deletion-fg);
+}
+
+.diff-file-collapse-button {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.diff-file-collapse-button:hover {
+  color: var(--foreground);
+}
+
+.diff-file-collapse-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+}
+
+.diff-file-collapse-icon-open {
+  mask: url("./assets/square-arrow-down.svg") center / contain no-repeat;
+}
+
+.diff-file-collapse-icon-closed {
+  mask: url("./assets/square-arrow-right.svg") center / contain no-repeat;
+}
+
+.diff-file-collapse-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.diff-file-viewed-checkbox {
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.diff-file-viewed-checkbox input {
+  appearance: none;
+  display: grid;
+  place-content: center;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  border: 1px solid var(--muted-foreground);
+  border-radius: 2px;
+  background: transparent;
+}
+
+.diff-file-viewed-checkbox input:checked {
+  border-color: var(--ring);
+  background: var(--ring);
+}
+
+.diff-file-viewed-checkbox input:checked::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  background: var(--background);
+  clip-path: polygon(14% 44%, 0 58%, 38% 96%, 100% 20%, 86% 8%, 36% 68%);
+}
+
+.diff-file-collapse-button:focus-visible,
+.diff-file-viewed-checkbox input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .diff-annotation {

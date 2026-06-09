@@ -74,6 +74,7 @@ import {
   type DirtyConfirmation,
   type DiffAnnotation,
   type DiffAnnotationSendTarget,
+  type DiffViewedFile,
   type ExtensionSettingsResponse,
   type OpenWorkspaceSummary,
   type ProjectSettings,
@@ -1302,6 +1303,25 @@ export function App() {
     });
   }, []);
 
+  const updateDiffTileViewedFiles = useCallback((tileId: string, viewedFiles: DiffViewedFile[]) => {
+    setLayout((previous) => {
+      const currentTile = previous.tiles.find((candidate) => candidate.id === tileId);
+      if (!currentTile || currentTile.kind !== "diff") return previous;
+      if (JSON.stringify(currentTile.viewedFiles ?? []) === JSON.stringify(viewedFiles)) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        tiles: previous.tiles.map((candidate) =>
+          candidate.id === tileId && candidate.kind === "diff"
+            ? { ...candidate, viewedFiles }
+            : candidate,
+        ),
+      };
+    });
+  }, []);
+
   const insertDiffAnnotationPayload = useCallback(
     async (targetTileId: string, payload: string) => {
       if (!currentWorkspaceId) return false;
@@ -1699,16 +1719,22 @@ export function App() {
                       />
                     ) : tile.kind === "diff" ? (
                       <DiffTile
+                        active={focused}
                         workspaceId={currentWorkspaceId}
                         refreshToken={diffRefreshToken}
                         themeId={resolvedThemeId}
                         diffColorPolarity={diffColorPolarity}
+                        reviewProgressVisible={tileSettings.diff.reviewProgressVisible}
                         annotations={tile.annotations ?? []}
+                        viewedFiles={tile.viewedFiles ?? []}
                         sendTargets={diffAnnotationSendTargets.filter(
                           (target) => target.id !== tile.id,
                         )}
                         onAnnotationsChange={(annotations) =>
                           updateDiffTileAnnotations(tile.id, annotations)
+                        }
+                        onViewedFilesChange={(viewedFiles) =>
+                          updateDiffTileViewedFiles(tile.id, viewedFiles)
                         }
                         onInsertAnnotationPayload={insertDiffAnnotationPayload}
                       />

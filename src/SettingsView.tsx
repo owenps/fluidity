@@ -8,6 +8,7 @@ import {
   codeEditorTabSizeMin,
   type DiffColorPolarity,
   normalizeCodeEditorSettings,
+  normalizeDiffTileSettings,
   normalizeTerminalTileSettings,
   terminalFontSizeMax,
   terminalFontSizeMin,
@@ -28,6 +29,7 @@ import type {
   ExtensionSettingsEntry,
   ExtensionSettingsResponse,
   CodeEditorSettings,
+  DiffTileSettings,
   ProjectSettings,
   RegisteredProject,
   TerminalTileSettings,
@@ -157,9 +159,14 @@ function terminalControlIds(prefix: string) {
   return [`${prefix}:font-size`];
 }
 
+function diffControlIds(prefix: string) {
+  return [`${prefix}:review-progress`];
+}
+
 function tileSettingsControlIds(item: ConfigurableTilePickerCatalogItem) {
   if (item.kind === "terminal") return terminalControlIds("tile-terminal");
   if (item.kind === "code") return codeEditorControlIds("tile-code-editor");
+  if (item.kind === "diff") return diffControlIds("tile-diff");
   return [];
 }
 
@@ -411,6 +418,7 @@ export function SettingsView({
 
   const terminalTileSettings = normalizeTerminalTileSettings(tileSettings.terminal);
   const codeEditorSettings = normalizeCodeEditorSettings(tileSettings.codeEditor);
+  const diffTileSettings = normalizeDiffTileSettings(tileSettings.diff);
 
   const updateTerminalTileSettings = (patch: Partial<TerminalTileSettings>) => {
     onTileSettingsChange({
@@ -423,6 +431,13 @@ export function SettingsView({
     onTileSettingsChange({
       ...tileSettings,
       codeEditor: normalizeCodeEditorSettings({ ...tileSettings.codeEditor, ...patch }),
+    });
+  };
+
+  const updateDiffTileSettings = (patch: Partial<DiffTileSettings>) => {
+    onTileSettingsChange({
+      ...tileSettings,
+      diff: normalizeDiffTileSettings({ ...tileSettings.diff, ...patch }),
     });
   };
 
@@ -513,6 +528,14 @@ export function SettingsView({
     if (key === "tabs-visible") updateCodeEditorSettings({ tabsVisible: !current.tabsVisible });
   };
 
+  const activateDiffTileControl = (controlId: string) => {
+    if (!controlId.startsWith("tile-diff:")) return;
+    const key = controlId.slice("tile-diff:".length);
+    if (key === "review-progress") {
+      updateDiffTileSettings({ reviewProgressVisible: !diffTileSettings.reviewProgressVisible });
+    }
+  };
+
   const activateControl = () => {
     if (activeControlId === "debug-layout") {
       onDebugLayoutChange(!debugLayout);
@@ -524,6 +547,10 @@ export function SettingsView({
     }
     if (activeControlId.startsWith("tile-code-editor:")) {
       activateCodeEditorControl(activeControlId);
+      return;
+    }
+    if (activeControlId.startsWith("tile-diff:")) {
+      activateDiffTileControl(activeControlId);
       return;
     }
     if (activeControlId === "tile-picker-refresh") {
@@ -608,6 +635,11 @@ export function SettingsView({
     if (activeControlId.startsWith("tile-code-editor:")) {
       setExpandedTileSettingsItemId(null);
       setActiveControlId("tile-picker:code");
+      return true;
+    }
+    if (activeControlId.startsWith("tile-diff:")) {
+      setExpandedTileSettingsItemId(null);
+      setActiveControlId("tile-picker:diff");
       return true;
     }
     return false;
@@ -1149,6 +1181,20 @@ export function SettingsView({
     });
   }
 
+  function renderDiffSettingsRows(
+    prefix: "tile-diff",
+    value: DiffTileSettings,
+    onChange: (patch: Partial<DiffTileSettings>) => void,
+  ) {
+    return renderToggleRow({
+      id: `${prefix}:review-progress`,
+      title: "Review progress",
+      description: "Show reviewed file count and progress in Diff tiles.",
+      checked: value.reviewProgressVisible,
+      onChange: (reviewProgressVisible) => onChange({ reviewProgressVisible }),
+    });
+  }
+
   function renderTilesDetail() {
     return (
       <div className="settings-detail-body settings-tiles-body">
@@ -1201,7 +1247,7 @@ export function SettingsView({
   function renderTileSettingsItem(item: ConfigurableTilePickerCatalogItem) {
     const active = activeControlId === `tile-picker:${item.id}` && focusPane === "right";
     const expanded = expandedTileSettingsItemId === item.id;
-    const configurable = item.kind === "terminal" || item.kind === "code";
+    const configurable = item.kind === "terminal" || item.kind === "code" || item.kind === "diff";
     return (
       <div key={item.id} className="settings-tile-config-item">
         <div
@@ -1250,6 +1296,9 @@ export function SettingsView({
         codeEditorSettings,
         updateCodeEditorSettings,
       );
+    }
+    if (item.kind === "diff") {
+      return renderDiffSettingsRows("tile-diff", diffTileSettings, updateDiffTileSettings);
     }
     return <div className="settings-detail-empty">No settings for this Tile yet.</div>;
   }

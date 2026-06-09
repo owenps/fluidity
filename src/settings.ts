@@ -4,7 +4,7 @@ import {
   defaultConfigurableTilePickerItems,
   type TilePickerVisibility,
 } from "./tilePickerCatalog";
-import type { CodeEditorSettings, TerminalTileSettings, TileSettings } from "./types";
+import type { CodeEditorSettings, DiffTileSettings, TerminalTileSettings, TileSettings } from "./types";
 
 export const terminalFontSizeMin = 10;
 export const terminalFontSizeMax = 24;
@@ -39,6 +39,22 @@ export function normalizeTerminalTileSettings(
       typeof value?.fontSize === "number" && Number.isFinite(value.fontSize)
         ? Math.min(terminalFontSizeMax, Math.max(terminalFontSizeMin, value.fontSize))
         : defaults.fontSize,
+  };
+}
+
+export function createDefaultDiffTileSettings(): DiffTileSettings {
+  return { reviewProgressVisible: false };
+}
+
+export function normalizeDiffTileSettings(
+  value: Partial<DiffTileSettings> | null | undefined,
+): DiffTileSettings {
+  const defaults = createDefaultDiffTileSettings();
+  return {
+    reviewProgressVisible:
+      typeof value?.reviewProgressVisible === "boolean"
+        ? value.reviewProgressVisible
+        : defaults.reviewProgressVisible,
   };
 }
 
@@ -98,6 +114,7 @@ export function createDefaultTileSettings(): TileSettings {
   return {
     terminal: createDefaultTerminalTileSettings(),
     codeEditor: createDefaultCodeEditorSettings(),
+    diff: createDefaultDiffTileSettings(),
   };
 }
 
@@ -106,6 +123,7 @@ export function normalizeTileSettings(
     | {
         terminal?: Partial<TerminalTileSettings> | null;
         codeEditor?: Partial<CodeEditorSettings> | null;
+        diff?: Partial<DiffTileSettings> | null;
       }
     | null
     | undefined,
@@ -113,6 +131,7 @@ export function normalizeTileSettings(
   return {
     terminal: normalizeTerminalTileSettings(value?.terminal),
     codeEditor: normalizeCodeEditorSettings(value?.codeEditor),
+    diff: normalizeDiffTileSettings(value?.diff),
   };
 }
 
@@ -168,6 +187,7 @@ export function normalizeAppSettings(value: Partial<AppSettings> | null | undefi
         ...legacyCodeEditorSettings,
         ...storedTileSettings.codeEditor,
       },
+      diff: storedTileSettings.diff,
     }),
     deletionPositiveStatColors:
       typeof value?.deletionPositiveStatColors === "boolean"

@@ -335,6 +335,8 @@ struct PersistedTile {
     editor: Option<CodeEditorTileState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     annotations: Option<Vec<DiffAnnotation>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    viewed_files: Option<Vec<DiffViewedFile>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     extension_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -373,6 +375,13 @@ struct DiffAnnotation {
     stale: bool,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiffViewedFile {
+    file_id: String,
+    signature: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -577,6 +586,13 @@ struct WorkspaceOverview {
     current: Option<CurrentWorkspaceResponse>,
     current_workspace_id: Option<String>,
     open_workspaces: Vec<OpenWorkspaceSummary>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct CurrentWorkspaceGitPatchRequest {
+    #[serde(default)]
+    ignore_whitespace: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -785,6 +801,7 @@ fn workspace_overview(state: State<'_, WorkspaceState>) -> Result<WorkspaceOverv
 #[tauri::command]
 fn workspace_git_patch_current(
     state: State<'_, WorkspaceState>,
+    request: Option<CurrentWorkspaceGitPatchRequest>,
 ) -> Result<CurrentWorkspaceGitPatchResponse, String> {
     let target = {
         let app_state = state.app_state.lock().map_err(lock_error)?;
@@ -826,10 +843,14 @@ fn workspace_git_patch_current(
         ));
     }
 
-    match run_git_command(
-        &workspace_root,
-        &["diff", "--no-ext-diff", "--no-color", "HEAD", "--"],
-    ) {
+    let request = request.unwrap_or_default();
+    let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=20"];
+    if request.ignore_whitespace {
+        args.push("--ignore-all-space");
+    }
+    args.extend(["HEAD", "--"]);
+
+    match run_git_command(&workspace_root, &args) {
         Ok(patch) => Ok(CurrentWorkspaceGitPatchResponse {
             workspace_id: Some(workspace_id),
             available: true,
@@ -1982,6 +2003,7 @@ fn default_workspace_tile_state() -> WorkspaceTileState {
                 title: "Terminal".to_string(),
                 editor: None,
                 annotations: None,
+                viewed_files: None,
                 extension_id: None,
                 integration_id: None,
                 integration_tile_id: None,
@@ -1999,6 +2021,7 @@ fn default_workspace_tile_state() -> WorkspaceTileState {
                 title: "Workspaces".to_string(),
                 editor: None,
                 annotations: None,
+                viewed_files: None,
                 extension_id: None,
                 integration_id: None,
                 integration_tile_id: None,
@@ -2041,8 +2064,10 @@ fn sanitize_tile_state(tile_state: WorkspaceTileState) -> WorkspaceTileState {
 
         if tile.kind != "diff" {
             tile.annotations = None;
+            tile.viewed_files = None;
         } else {
             tile.annotations = sanitize_diff_annotations(tile.annotations.take());
+            tile.viewed_files = sanitize_diff_viewed_files(tile.viewed_files.take());
         }
 
         if tile.kind == "terminal" {
@@ -2135,6 +2160,26 @@ fn sanitize_diff_annotations(
         None
     } else {
         Some(annotations)
+    }
+}
+
+fn sanitize_diff_viewed_files(
+    viewed_files: Option<Vec<DiffViewedFile>>,
+) -> Option<Vec<DiffViewedFile>> {
+    let mut seen = HashSet::new();
+    let viewed_files: Vec<DiffViewedFile> = viewed_files?
+        .into_iter()
+        .filter(|viewed_file| {
+            !viewed_file.file_id.trim().is_empty()
+                && !viewed_file.signature.trim().is_empty()
+                && seen.insert(viewed_file.file_id.clone())
+        })
+        .collect();
+
+    if viewed_files.is_empty() {
+        None
+    } else {
+        Some(viewed_files)
     }
 }
 
@@ -4249,6 +4294,7 @@ mod tests {
                 title: "Missing Agent".to_string(),
                 editor: None,
                 annotations: None,
+                viewed_files: None,
                 extension_id: Some("example.missing".to_string()),
                 integration_id: Some("missing-agent".to_string()),
                 integration_tile_id: Some("cli".to_string()),
@@ -4706,6 +4752,7 @@ mod tests {
             title: "Test".to_string(),
             editor: None,
             annotations: None,
+            viewed_files: None,
             extension_id: None,
             integration_id: None,
             integration_tile_id: None,
@@ -4726,6 +4773,7 @@ mod tests {
             title: "".to_string(),
             editor: None,
             annotations: None,
+            viewed_files: None,
             extension_id: None,
             integration_id: None,
             integration_tile_id: None,

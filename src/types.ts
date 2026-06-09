@@ -60,9 +60,14 @@ export interface TerminalTileSettings {
   fontSize: number;
 }
 
+export interface DiffTileSettings {
+  reviewProgressVisible: boolean;
+}
+
 export interface TileSettings {
   terminal: TerminalTileSettings;
   codeEditor: CodeEditorSettings;
+  diff: DiffTileSettings;
 }
 
 export interface CodeEditorViewState {
@@ -105,6 +110,12 @@ export interface DiffAnnotation {
 export interface DiffWorkspaceTile extends BaseTile {
   kind: "diff";
   annotations?: DiffAnnotation[];
+  viewedFiles?: DiffViewedFile[];
+}
+
+export interface DiffViewedFile {
+  fileId: string;
+  signature: string;
 }
 
 export interface DiffAnnotationSendTarget {
@@ -257,6 +268,10 @@ export interface ApplicationResetResponse {
 export interface WorkspaceTileStateSaveRequest {
   workspaceId: string;
   tileState: WorkspaceTileState;
+}
+
+export interface CurrentWorkspaceGitPatchRequest {
+  ignoreWhitespace?: boolean;
 }
 
 export interface CurrentWorkspaceGitPatchResponse {
