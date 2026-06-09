@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Fluidity",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "identifier": "com.owenps.fluidity",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -31,6 +31,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyOTE3MjEzM0U0NUI0NDAKUldSQXRFVStFM0tSWXFhUVN4dGN3QUF6SUpaZnVNdkZQUGJ0RWJlWUZmZ1IvV0tDMUpaWCswNWoK",
+      "endpoints": ["https://fluidity.build/updates/stable.json"]
+    }
   }
 }

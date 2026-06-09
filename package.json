@@ -1,6 +1,6 @@
 {
   "name": "fluidity",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,7 @@
     "@iconify/react": "^6.0.2",
     "@pierre/diffs": "^1.2.8",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "dompurify": "^3.4.8",
