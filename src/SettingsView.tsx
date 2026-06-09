@@ -587,9 +587,7 @@ export function SettingsView({
     }
     if (activeControlId.startsWith("tile-code-editor:")) {
       adjustCodeEditorControl(activeControlId, delta);
-      return;
     }
-    if (delta > 0) activateControl();
   };
 
   const adjustCodeEditorControl = (controlId: string, delta: number) => {
@@ -600,7 +598,7 @@ export function SettingsView({
       updateCodeEditorSettings({ fontSize: current.fontSize + delta * codeEditorFontSizeStep });
     } else if (key === "tab-size") {
       updateCodeEditorSettings({ tabSize: current.tabSize + delta * codeEditorTabSizeStep });
-    } else if (delta > 0) activateCodeEditorControl(controlId);
+    }
   };
 
   const switchSettingsScope = () => {
