@@ -71,4 +71,4 @@ jobs:
           releaseBody: "Release notes: https://fluidity.build/releases/${{ github.event.inputs.tag || github.ref_name }}"
           releaseDraft: true
           prerelease: ${{ startsWith(github.event.inputs.tag || github.ref_name, 'v0.0.') }}
-          args: --target universal-apple-darwin
+          args: --config src-tauri/tauri.stable.conf.json --target universal-apple-darwin

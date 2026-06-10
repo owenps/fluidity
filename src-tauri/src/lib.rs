@@ -117,6 +117,8 @@ struct PersistedAppState {
     current_workspace_id: Option<String>,
     #[serde(default)]
     generated_workspace_branch_names: Vec<String>,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 impl Default for PersistedAppState {
@@ -129,6 +131,7 @@ impl Default for PersistedAppState {
             workspace_stack: Vec::new(),
             current_workspace_id: None,
             generated_workspace_branch_names: Vec::new(),
+            extra: HashMap::new(),
         }
     }
 }
@@ -153,6 +156,8 @@ struct AppSettings {
     workspace_branch_prefix: String,
     #[serde(default)]
     tile_picker_visibility: HashMap<String, bool>,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 fn default_theme_id() -> String {
@@ -196,6 +201,8 @@ struct TileSettings {
     terminal: TerminalTileSettings,
     #[serde(default)]
     code_editor: CodeEditorSettings,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,12 +210,15 @@ struct TileSettings {
 struct TerminalTileSettings {
     #[serde(default = "default_terminal_font_size")]
     font_size: f64,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 impl Default for TerminalTileSettings {
     fn default() -> Self {
         Self {
             font_size: default_terminal_font_size(),
+            extra: HashMap::new(),
         }
     }
 }
@@ -238,6 +248,8 @@ struct CodeEditorSettings {
     tab_title_mode: CodeEditorTabTitleMode,
     #[serde(default = "default_true")]
     tabs_visible: bool,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 impl Default for CodeEditorSettings {
@@ -254,6 +266,7 @@ impl Default for CodeEditorSettings {
             auto_save: CodeEditorAutoSave::Off,
             tab_title_mode: CodeEditorTabTitleMode::Path,
             tabs_visible: true,
+            extra: HashMap::new(),
         }
     }
 }
@@ -296,6 +309,7 @@ impl Default for AppSettings {
             window_opacity: default_window_opacity(),
             workspace_branch_prefix: String::new(),
             tile_picker_visibility: HashMap::new(),
+            extra: HashMap::new(),
         }
     }
 }
@@ -313,6 +327,8 @@ struct ProjectSettings {
     project_search_include_paths: Vec<String>,
     #[serde(default)]
     project_search_exclude_paths: Vec<String>,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -925,6 +941,7 @@ fn app_settings_update(
     )?;
 
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
+    preserve_unknown_app_settings_fields(&mut settings, &app_state.settings);
     app_state.settings = settings;
     state.save(&app_state)?;
     Ok(app_state.settings.clone())
@@ -982,6 +999,7 @@ fn project_settings_update(
         .iter_mut()
         .find(|project| project.id == request.project_id)
         .ok_or_else(|| "project not found".to_string())?;
+    preserve_unknown_project_settings_fields(&mut settings, &project.settings);
     project.settings = settings;
     let response = project_list_item(project);
     state.save(&app_state)?;
@@ -1734,6 +1752,36 @@ fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
             &Submenu::with_items(app, "Help", true, &[])?,
         ],
     )
+}
+
+fn preserve_unknown_app_settings_fields(updated: &mut AppSettings, previous: &AppSettings) {
+    updated.extra = merge_extra_fields(&previous.extra, &updated.extra);
+    updated.tile_settings.extra =
+        merge_extra_fields(&previous.tile_settings.extra, &updated.tile_settings.extra);
+    updated.tile_settings.terminal.extra = merge_extra_fields(
+        &previous.tile_settings.terminal.extra,
+        &updated.tile_settings.terminal.extra,
+    );
+    updated.tile_settings.code_editor.extra = merge_extra_fields(
+        &previous.tile_settings.code_editor.extra,
+        &updated.tile_settings.code_editor.extra,
+    );
+}
+
+fn preserve_unknown_project_settings_fields(
+    updated: &mut ProjectSettings,
+    previous: &ProjectSettings,
+) {
+    updated.extra = merge_extra_fields(&previous.extra, &updated.extra);
+}
+
+fn merge_extra_fields(
+    previous: &HashMap<String, serde_json::Value>,
+    updated: &HashMap<String, serde_json::Value>,
+) -> HashMap<String, serde_json::Value> {
+    let mut merged = previous.clone();
+    merged.extend(updated.clone());
+    merged
 }
 
 fn load_app_state(state_path: &Path) -> PersistedAppState {
@@ -3495,6 +3543,115 @@ mod tests {
     use super::*;
 
     #[test]
+    fn app_state_round_trip_preserves_unknown_fields() {
+        let temp_dir = test_temp_dir("fluidity-unknown-state-fields");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let state_path = temp_dir.join(APP_STATE_FILE);
+        fs::write(
+            &state_path,
+            serde_json::json!({
+                "version": APP_STATE_VERSION,
+                "settings": {
+                    "debugLayout": false,
+                    "themeId": "system",
+                    "tileHeadersVisible": true,
+                    "tileSettings": {
+                        "terminal": { "fontSize": 14, "futureTerminalSetting": "keep" },
+                        "codeEditor": { "futureEditorSetting": 7 },
+                        "diff": { "reviewProgressVisible": true },
+                        "futureTileKind": { "enabled": true }
+                    },
+                    "deletionPositiveStatColors": false,
+                    "windowOpacity": 100,
+                    "futureAppSetting": "keep"
+                },
+                "projects": [],
+                "openWorkspaces": [],
+                "futureRootSetting": { "keep": true }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let mut app_state = load_app_state(&state_path);
+        app_state.settings.window_opacity = 90.0;
+        save_app_state(&state_path, &app_state).unwrap();
+
+        let saved: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+        assert_eq!(saved["futureRootSetting"]["keep"], true);
+        assert_eq!(saved["settings"]["futureAppSetting"], "keep");
+        assert_eq!(
+            saved["settings"]["tileSettings"]["terminal"]["futureTerminalSetting"],
+            "keep"
+        );
+        assert_eq!(
+            saved["settings"]["tileSettings"]["codeEditor"]["futureEditorSetting"],
+            7
+        );
+        assert_eq!(
+            saved["settings"]["tileSettings"]["diff"]["reviewProgressVisible"],
+            true
+        );
+        assert_eq!(
+            saved["settings"]["tileSettings"]["futureTileKind"]["enabled"],
+            true
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn settings_update_preserves_unknown_previous_fields() {
+        let mut previous = AppSettings::default();
+        previous
+            .extra
+            .insert("futureAppSetting".to_string(), serde_json::json!("keep"));
+        previous.tile_settings.extra.insert(
+            "futureTileKind".to_string(),
+            serde_json::json!({ "enabled": true }),
+        );
+        previous.tile_settings.terminal.extra.insert(
+            "futureTerminalSetting".to_string(),
+            serde_json::json!("keep"),
+        );
+        previous
+            .tile_settings
+            .code_editor
+            .extra
+            .insert("futureEditorSetting".to_string(), serde_json::json!(7));
+
+        let mut updated = AppSettings::default();
+        updated.theme_id = "github-dark".to_string();
+        preserve_unknown_app_settings_fields(&mut updated, &previous);
+
+        assert_eq!(
+            updated.extra.get("futureAppSetting"),
+            Some(&serde_json::json!("keep"))
+        );
+        assert_eq!(
+            updated.tile_settings.extra.get("futureTileKind"),
+            Some(&serde_json::json!({ "enabled": true }))
+        );
+        assert_eq!(
+            updated
+                .tile_settings
+                .terminal
+                .extra
+                .get("futureTerminalSetting"),
+            Some(&serde_json::json!("keep"))
+        );
+        assert_eq!(
+            updated
+                .tile_settings
+                .code_editor
+                .extra
+                .get("futureEditorSetting"),
+            Some(&serde_json::json!(7))
+        );
+    }
+
+    #[test]
     fn project_file_index_filters_include_paths_before_exclude_paths() {
         let project_settings = ProjectSettings {
             project_search_include_paths: vec!["src".to_string(), "README.md".to_string()],
@@ -3830,6 +3987,7 @@ mod tests {
             workspace_stack: Vec::new(),
             current_workspace_id: Some("workspace-a".to_string()),
             generated_workspace_branch_names: Vec::new(),
+            extra: HashMap::new(),
         };
 
         migrate_workspace_stack(&mut app_state);
@@ -3880,6 +4038,7 @@ mod tests {
             workspace_stack: vec!["workspace-b".to_string(), "workspace-a".to_string()],
             current_workspace_id: None,
             generated_workspace_branch_names: Vec::new(),
+            extra: HashMap::new(),
         };
 
         let removed = workspace_removal::remove_workspaces_from_state(

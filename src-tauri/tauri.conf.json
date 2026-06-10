@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Fluidity",
+  "productName": "Fluidity Dev",
   "version": "0.0.3",
-  "identifier": "com.owenps.fluidity",
+  "identifier": "com.owenps.fluidity.dev",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",

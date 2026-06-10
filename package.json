@@ -10,7 +10,8 @@
     "format": "oxfmt src",
     "format:check": "oxfmt --check src",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:stable:build": "tauri build --config src-tauri/tauri.stable.conf.json"
   },
   "dependencies": {
     "@iconify-json/catppuccin": "^1.2.17",
