@@ -3,6 +3,7 @@ import MarkdownIt from "markdown-it";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
 import { useEffect, useMemo, useRef } from "react";
 import { markdownTaskListPlugin } from "./markdownTaskLists";
+import { CustomScrollbars } from "./ScrollArea";
 
 const markdown = new MarkdownIt({ html: false, linkify: true, typographer: true });
 markdown.use(markdownTaskListPlugin);
@@ -84,24 +85,32 @@ export function NotepadTile({
   return (
     <div className="notepad-tile" data-active={active ? "true" : "false"}>
       {previewVisible ? (
-        value.trim() ? (
-          <div
-            ref={previewRef}
-            className="notepad-preview"
-            dangerouslySetInnerHTML={{ __html: previewHtml }}
-          />
-        ) : (
-          <div className="notepad-preview notepad-preview-empty">Think here...</div>
-        )
+        <>
+          {value.trim() ? (
+            <div
+              ref={previewRef}
+              className="notepad-preview"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          ) : (
+            <div ref={previewRef} className="notepad-preview notepad-preview-empty">
+              Think here...
+            </div>
+          )}
+          <CustomScrollbars viewportRef={previewRef} refreshKey={previewHtml} />
+        </>
       ) : (
-        <textarea
-          ref={textareaRef}
-          className="notepad-textarea"
-          value={value}
-          placeholder="Think here..."
-          spellCheck
-          onChange={(event) => onChange(event.currentTarget.value)}
-        />
+        <>
+          <textarea
+            ref={textareaRef}
+            className="notepad-textarea"
+            value={value}
+            placeholder="Think here..."
+            spellCheck
+            onChange={(event) => onChange(event.currentTarget.value)}
+          />
+          <CustomScrollbars viewportRef={textareaRef} refreshKey={value} />
+        </>
       )}
     </div>
   );

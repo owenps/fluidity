@@ -711,6 +711,7 @@ body {
 }
 
 .notepad-tile {
+  position: relative;
   background: var(--card);
   color: var(--foreground);
 }
@@ -721,10 +722,20 @@ body {
   height: 100%;
   min-height: 0;
   overflow: auto;
+  scrollbar-color: transparent transparent;
+  scrollbar-width: none;
   padding: 0.85rem;
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
   line-height: 1.55;
+}
+
+.notepad-textarea::-webkit-scrollbar,
+.notepad-preview::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
 }
 
 .notepad-textarea {
@@ -760,6 +771,29 @@ body {
   border-radius: 6px;
   background: var(--muted);
   padding: 0.65rem;
+  scrollbar-color: var(--fluidity-scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+
+.notepad-preview pre::-webkit-scrollbar {
+  width: 14px;
+  height: 12px;
+}
+
+.notepad-preview pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.notepad-preview pre::-webkit-scrollbar-thumb {
+  background: var(--fluidity-scrollbar-thumb);
+}
+
+.notepad-preview pre::-webkit-scrollbar-thumb:hover {
+  background: var(--fluidity-scrollbar-thumb-hover);
+}
+
+.notepad-preview pre::-webkit-scrollbar-thumb:active {
+  background: var(--fluidity-scrollbar-thumb-active);
 }
 
 .notepad-preview pre code {

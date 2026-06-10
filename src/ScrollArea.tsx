@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
 interface ScrollAreaMetrics {
   clientHeight: number;
@@ -21,6 +29,24 @@ interface DragState {
 
 export function ScrollArea({ className, children }: { className?: string; children: ReactNode }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+
+  return (
+    <div className={["fluidity-scroll-area", className].filter(Boolean).join(" ")}>
+      <div ref={viewportRef} className="fluidity-scroll-area-viewport">
+        {children}
+      </div>
+      <CustomScrollbars viewportRef={viewportRef} />
+    </div>
+  );
+}
+
+export function CustomScrollbars<T extends HTMLElement>({
+  viewportRef,
+  refreshKey,
+}: {
+  viewportRef: RefObject<T | null>;
+  refreshKey?: unknown;
+}) {
   const dragRef = useRef<DragState | null>(null);
   const [metrics, setMetrics] = useState<ScrollAreaMetrics>({
     clientHeight: 0,
@@ -31,7 +57,7 @@ export function ScrollArea({ className, children }: { className?: string; childr
     scrollWidth: 0,
   });
 
-  const updateMetrics = () => {
+  const updateMetrics = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     setMetrics({
@@ -42,7 +68,7 @@ export function ScrollArea({ className, children }: { className?: string; childr
       scrollTop: viewport.scrollTop,
       scrollWidth: viewport.scrollWidth,
     });
-  };
+  }, [viewportRef]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -54,15 +80,28 @@ export function ScrollArea({ className, children }: { className?: string; childr
     if (viewport.firstElementChild) resizeObserver.observe(viewport.firstElementChild);
 
     const mutationObserver = new MutationObserver(updateMetrics);
-    mutationObserver.observe(viewport, { childList: true, subtree: true });
+    mutationObserver.observe(viewport, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
 
+    viewport.addEventListener("input", updateMetrics, { passive: true });
     viewport.addEventListener("scroll", updateMetrics, { passive: true });
     return () => {
+      viewport.removeEventListener("input", updateMetrics);
       viewport.removeEventListener("scroll", updateMetrics);
       resizeObserver.disconnect();
       mutationObserver.disconnect();
     };
-  }, []);
+  }, [updateMetrics, viewportRef]);
+
+  useEffect(() => {
+    updateMetrics();
+    const animationFrameId = requestAnimationFrame(updateMetrics);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [refreshKey, updateMetrics]);
 
   const verticalVisible = metrics.scrollHeight > metrics.clientHeight + 1;
   const horizontalVisible = metrics.scrollWidth > metrics.clientWidth + 1;
@@ -122,10 +161,7 @@ export function ScrollArea({ className, children }: { className?: string; childr
   };
 
   return (
-    <div className={["fluidity-scroll-area", className].filter(Boolean).join(" ")}>
-      <div ref={viewportRef} className="fluidity-scroll-area-viewport">
-        {children}
-      </div>
+    <>
       {verticalVisible ? (
         <div className="fluidity-scroll-area-scrollbar fluidity-scroll-area-scrollbar-vertical">
           <div
@@ -153,7 +189,7 @@ export function ScrollArea({ className, children }: { className?: string; childr
           />
         </div>
       ) : null}
-    </div>
+    </>
   );
 }
 
