@@ -22,6 +22,7 @@ import "monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution.js";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import "monaco-editor/min/vs/editor/editor.main.css";
 import { VimMode, initVimMode, type VimAdapterInstance } from "monaco-vim";
+import { registerGoTokenization } from "./goTokenization";
 import { registerCodeEditorThemes, type ThemeId } from "./themeRegistry";
 import { readCodeFile, statCodeFile, writeCodeFile } from "./codeFileClient";
 import { getCurrentWorkspaceGitPatch } from "./diffClient";
@@ -852,6 +853,7 @@ export function CodeEditorTile({
     if (!editorHostRef.current) return;
 
     registerCodeEditorThemes(monaco.editor);
+    registerGoTokenization(monaco.languages);
     registerVimWriteCommand();
 
     const saveActiveEditor = () => {
