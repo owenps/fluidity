@@ -1435,6 +1435,7 @@ fn terminal_close(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(TerminalState::default())
         .invoke_handler(tauri::generate_handler![

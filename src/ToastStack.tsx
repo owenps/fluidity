@@ -6,11 +6,19 @@ const toastSeverityLabels: Record<ToastSeverity, string> = {
   success: "Success",
 };
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+  variant?: "primary" | "secondary";
+}
+
 export interface AppToast {
   id: string;
   severity: ToastSeverity;
   title: string;
   detail?: string;
+  actions?: ToastAction[];
+  autoDismiss?: boolean;
 }
 
 interface ToastStackProps {
@@ -30,6 +38,20 @@ export function ToastStack({ toasts, onDismiss }: ToastStackProps) {
             <span className="toast-status-label">{toastSeverityLabels[toast.severity]}</span>
             <h2>{toast.title}</h2>
             {toast.detail ? <p>{toast.detail}</p> : null}
+            {toast.actions?.length ? (
+              <div className="toast-actions">
+                {toast.actions.map((action) => (
+                  <button
+                    key={action.label}
+                    className={`toast-action toast-action-${action.variant ?? "secondary"}`}
+                    type="button"
+                    onClick={action.onClick}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
           <button
             className="toast-dismiss"

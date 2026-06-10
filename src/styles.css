@@ -282,6 +282,39 @@ body {
   line-height: 1.35;
 }
 
+.toast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+}
+
+.toast-action {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0.35rem 0.6rem;
+}
+
+.toast-action:hover {
+  background: var(--accent);
+}
+
+.toast-action-primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.toast-action-primary:hover {
+  filter: brightness(1.05);
+}
+
 .toast-dismiss {
   display: grid;
   place-items: center;

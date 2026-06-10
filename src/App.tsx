@@ -48,7 +48,8 @@ import {
   closeTerminalSessionRuntimesForWorkspace,
   insertTextIntoTerminalSessionRuntime,
 } from "./terminalSessionRuntime";
-import { ToastStack, type AppToast, type ToastSeverity } from "./ToastStack";
+import { ToastStack, type AppToast } from "./ToastStack";
+import { checkForAvailableUpdate, relaunchApplication } from "./updateClient";
 import { WorkspaceTile } from "./WorkspaceTile";
 import {
   closeTile,
@@ -360,6 +361,7 @@ export function App() {
   const previousTileRuntimeOwnersRef = useRef<{ workspaceId: string | null; tileIds: Set<string> }>(
     { workspaceId: null, tileIds: new Set() },
   );
+  const updateInstallInFlightRef = useRef(false);
   const [resolvedThemeId, setResolvedThemeId] = useState(() => resolveThemeId(themeId));
 
   useEffect(() => {
@@ -484,16 +486,79 @@ export function App() {
   }, []);
 
   const addToast = useCallback(
-    (toast: { severity: ToastSeverity; title: string; detail?: string }) => {
+    (toast: Omit<AppToast, "id">) => {
       const id = crypto.randomUUID();
       setToasts((previous) => previous.concat({ id, ...toast }));
 
-      if (toast.severity !== "error") {
+      if (toast.autoDismiss !== false && toast.severity !== "error") {
         window.setTimeout(() => dismissToast(id), 4000);
       }
+
+      return id;
     },
     [dismissToast],
   );
+
+  useEffect(() => {
+    void checkForAvailableUpdate()
+      .then((update) => {
+        if (!update) return;
+
+        const installUpdate = () => {
+          if (updateInstallInFlightRef.current) return;
+          updateInstallInFlightRef.current = true;
+          addToast({
+            severity: "info",
+            title: "Installing update",
+            detail: `Downloading Fluidity ${update.version}…`,
+            autoDismiss: false,
+          });
+
+          void update
+            .install()
+            .then(() => {
+              addToast({
+                severity: "success",
+                title: "Update installed",
+                detail: "Restart Fluidity to finish.",
+                autoDismiss: false,
+                actions: [
+                  {
+                    label: "Restart",
+                    variant: "primary",
+                    onClick: () => {
+                      void relaunchApplication();
+                    },
+                  },
+                ],
+              });
+            })
+            .catch((error) => {
+              updateInstallInFlightRef.current = false;
+              addToast({
+                severity: "error",
+                title: "Update failed",
+                detail: String(error),
+              });
+            });
+        };
+
+        addToast({
+          severity: "info",
+          title: `Fluidity ${update.version} available`,
+          detail: update.notes ?? "A new Fluidity release is ready to install.",
+          autoDismiss: false,
+          actions: [
+            { label: "Update", variant: "primary", onClick: installUpdate },
+            {
+              label: "Release notes",
+              onClick: () => window.open(update.notesUrl, "_blank", "noopener,noreferrer"),
+            },
+          ],
+        });
+      })
+      .catch(() => {});
+  }, [addToast]);
 
   const addWarningToasts = useCallback(
     (warnings: string[]) => {
