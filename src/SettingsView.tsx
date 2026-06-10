@@ -2,6 +2,8 @@ import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_NAME } from "./appConstants";
 import {
+  appWindowOpacityMax,
+  appWindowOpacityMin,
   codeEditorFontSizeMax,
   codeEditorFontSizeMin,
   codeEditorTabSizeMax,
@@ -42,6 +44,7 @@ import type {
 const terminalFontSizeStep = 1;
 const codeEditorFontSizeStep = 1;
 const codeEditorTabSizeStep = 1;
+const appWindowOpacityStep = 1;
 
 type SettingsScope = "global" | "project";
 type SettingsCategoryId = "general" | "appearance" | "tiles" | "extensions" | "keybinds";
@@ -73,6 +76,8 @@ interface SettingsViewProps {
   onTileHeadersVisibleChange: (visible: boolean) => void;
   diffColorPolarity: DiffColorPolarity;
   onDiffColorPolarityChange: (polarity: DiffColorPolarity) => void;
+  windowOpacity: number;
+  onWindowOpacityChange: (opacity: number) => void;
   workspaceBranchPrefix: string;
   onWorkspaceBranchPrefixChange: (prefix: string) => void;
   tilePickerVisibility: TilePickerVisibility;
@@ -190,7 +195,7 @@ function controlIdsForSelection(
       return ["workspace-branch-prefix", "debug-layout", "reset-application"];
     }
     if (globalCategory === "appearance") {
-      return ["app-theme", "tile-headers", "diff-color-polarity"];
+      return ["app-theme", "tile-headers", "diff-color-polarity", "window-opacity"];
     }
     if (globalCategory === "tiles") {
       return [
@@ -234,6 +239,8 @@ export function SettingsView({
   onTileHeadersVisibleChange,
   diffColorPolarity,
   onDiffColorPolarityChange,
+  windowOpacity,
+  onWindowOpacityChange,
   workspaceBranchPrefix,
   onWorkspaceBranchPrefixChange,
   tilePickerVisibility,
@@ -685,6 +692,15 @@ export function SettingsView({
       });
       return;
     }
+    if (activeControlId === "window-opacity") {
+      onWindowOpacityChange(
+        Math.min(
+          appWindowOpacityMax,
+          Math.max(appWindowOpacityMin, windowOpacity + delta * appWindowOpacityStep),
+        ),
+      );
+      return;
+    }
     if (activeControlId.startsWith("tile-code-editor:")) {
       adjustCodeEditorControl(activeControlId, delta);
     }
@@ -1085,6 +1101,18 @@ export function SettingsView({
             </select>
           </span>
         </label>
+        {renderNumberSliderRow({
+          id: "window-opacity",
+          title: "Application opacity",
+          description: "Fade the whole Fluidity window.",
+          value: windowOpacity,
+          min: appWindowOpacityMin,
+          max: appWindowOpacityMax,
+          step: appWindowOpacityStep,
+          suffix: "%",
+          ariaLabel: "Application opacity",
+          onChange: onWindowOpacityChange,
+        })}
       </div>
     );
   }

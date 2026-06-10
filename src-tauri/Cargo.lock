@@ -1081,6 +1081,7 @@ dependencies = [
 name = "fluidity"
 version = "0.0.2"
 dependencies = [
+ "objc2",
  "portable-pty",
  "rfd",
  "serde",

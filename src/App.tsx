@@ -42,7 +42,12 @@ import {
   normalizeCodeEditorSettings,
   type AppSettings,
 } from "./settings";
-import { getAppSettings, updateAppSettings, updateProjectSettings } from "./settingsClient";
+import {
+  getAppSettings,
+  setAppWindowOpacity,
+  updateAppSettings,
+  updateProjectSettings,
+} from "./settingsClient";
 import { TerminalTile } from "./TerminalTile";
 import {
   closeAllTerminalSessionRuntimes,
@@ -365,6 +370,7 @@ export function App() {
     themeId,
     tileHeadersVisible,
     diffColorPolarity,
+    windowOpacity,
     workspaceBranchPrefix,
     tilePickerVisibility,
   } = settings;
@@ -386,6 +392,10 @@ export function App() {
     applyTheme();
     return onSystemThemeChange(applyTheme);
   }, [themeId]);
+
+  useEffect(() => {
+    void setAppWindowOpacity(windowOpacity).catch(() => {});
+  }, [windowOpacity]);
 
   useEffect(() => {
     layoutRef.current = layout;
@@ -1481,6 +1491,10 @@ export function App() {
     updateSettings((previous) => ({ ...previous, diffColorPolarity }));
   };
 
+  const setWindowOpacitySetting = (windowOpacity: number) => {
+    updateSettings((previous) => ({ ...previous, windowOpacity }));
+  };
+
   const setWorkspaceBranchPrefixSetting = (workspaceBranchPrefix: string) => {
     updateSettings((previous) => ({ ...previous, workspaceBranchPrefix }));
   };
@@ -1952,6 +1966,8 @@ export function App() {
           onTileHeadersVisibleChange={setTileHeadersVisibleSetting}
           diffColorPolarity={diffColorPolarity}
           onDiffColorPolarityChange={setDiffColorPolaritySetting}
+          windowOpacity={windowOpacity}
+          onWindowOpacityChange={setWindowOpacitySetting}
           workspaceBranchPrefix={workspaceBranchPrefix}
           onWorkspaceBranchPrefixChange={setWorkspaceBranchPrefixSetting}
           tilePickerVisibility={tilePickerVisibility}

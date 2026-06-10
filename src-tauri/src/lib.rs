@@ -44,6 +44,9 @@ use tile_definition::{
 };
 use uuid::Uuid;
 
+#[cfg(target_os = "macos")]
+use objc2::{msg_send, runtime::AnyObject};
+
 const APP_NAME: &str = "Fluidity";
 const OPEN_SETTINGS_MENU_ID: &str = "settings.open";
 const OPEN_SETTINGS_EVENT: &str = "app://open-settings";
@@ -68,6 +71,9 @@ const DEFAULT_WORKSPACE_TILE_WIDTH: i32 = 3;
 const CODE_FILE_SIZE_LIMIT_BYTES: u64 = 2 * 1024 * 1024;
 const PROJECT_FILE_INDEX_LIMIT: usize = 20_000;
 const DEFAULT_THEME_ID: &str = "system";
+const DEFAULT_WINDOW_OPACITY: f64 = 100.0;
+const MIN_WINDOW_OPACITY: f64 = 50.0;
+const MAX_WINDOW_OPACITY: f64 = 100.0;
 
 struct WorkspaceState {
     state_path: PathBuf,
@@ -141,6 +147,8 @@ struct AppSettings {
     deletion_positive_stat_colors: bool,
     #[serde(default)]
     diff_color_polarity: DiffColorPolarity,
+    #[serde(default = "default_window_opacity")]
+    window_opacity: f64,
     #[serde(default)]
     workspace_branch_prefix: String,
     #[serde(default)]
@@ -165,6 +173,20 @@ fn default_code_editor_font_size() -> f64 {
 
 fn default_code_editor_tab_size() -> u32 {
     2
+}
+
+fn default_window_opacity() -> f64 {
+    DEFAULT_WINDOW_OPACITY
+}
+
+fn normalize_window_opacity(opacity: f64) -> f64 {
+    if opacity.is_finite() {
+        opacity
+            .round()
+            .clamp(MIN_WINDOW_OPACITY, MAX_WINDOW_OPACITY)
+    } else {
+        DEFAULT_WINDOW_OPACITY
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -271,6 +293,7 @@ impl Default for AppSettings {
             tile_settings: TileSettings::default(),
             deletion_positive_stat_colors: false,
             diff_color_polarity: DiffColorPolarity::default(),
+            window_opacity: default_window_opacity(),
             workspace_branch_prefix: String::new(),
             tile_picker_visibility: HashMap::new(),
         }
@@ -895,6 +918,7 @@ fn app_settings_update(
     request: AppSettingsUpdateRequest,
 ) -> Result<AppSettings, String> {
     let mut settings = request.settings;
+    settings.window_opacity = normalize_window_opacity(settings.window_opacity);
     settings.workspace_branch_prefix = normalize_workspace_branch_prefix(
         &settings.workspace_branch_prefix,
         "Workspace Branch Prefix",
@@ -904,6 +928,39 @@ fn app_settings_update(
     app_state.settings = settings;
     state.save(&app_state)?;
     Ok(app_state.settings.clone())
+}
+
+#[tauri::command]
+fn app_window_opacity_set(window: tauri::Window<tauri::Wry>, opacity: f64) -> Result<(), String> {
+    set_native_window_opacity(&window, normalize_window_opacity(opacity))
+}
+
+#[cfg(target_os = "macos")]
+fn set_native_window_opacity<R: Runtime>(
+    window: &tauri::Window<R>,
+    opacity_percent: f64,
+) -> Result<(), String> {
+    let ns_window = window.ns_window().map_err(|error| error.to_string())?;
+    let alpha = (opacity_percent / MAX_WINDOW_OPACITY).clamp(0.0, 1.0);
+
+    unsafe {
+        let ns_window = ns_window.cast::<AnyObject>();
+        let _: () = msg_send![ns_window, setAlphaValue: alpha];
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_native_window_opacity<R: Runtime>(
+    _window: &tauri::Window<R>,
+    opacity_percent: f64,
+) -> Result<(), String> {
+    if (opacity_percent - DEFAULT_WINDOW_OPACITY).abs() < f64::EPSILON {
+        Ok(())
+    } else {
+        Err("Window opacity is only implemented on macOS.".to_string())
+    }
 }
 
 #[tauri::command]
@@ -1465,6 +1522,7 @@ pub fn run() {
             workspace_switch,
             app_settings_get,
             app_settings_update,
+            app_window_opacity_set,
             project_settings_update,
             project_list,
             project_add,

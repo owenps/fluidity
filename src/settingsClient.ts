@@ -14,6 +14,10 @@ export async function updateAppSettings(settings: AppSettings): Promise<AppSetti
   return normalizeAppSettings(saved);
 }
 
+export function setAppWindowOpacity(opacity: number): Promise<void> {
+  return invoke("app_window_opacity_set", { opacity });
+}
+
 export function updateProjectSettings(
   projectId: string,
   settings: ProjectSettings,

@@ -18,6 +18,8 @@ export const codeEditorFontSizeMin = 10;
 export const codeEditorFontSizeMax = 24;
 export const codeEditorTabSizeMin = 1;
 export const codeEditorTabSizeMax = 8;
+export const appWindowOpacityMin = 50;
+export const appWindowOpacityMax = 100;
 
 export type DiffColorPolarity = "standard" | "reversed";
 
@@ -28,6 +30,7 @@ export interface AppSettings {
   tileSettings: TileSettings;
   deletionPositiveStatColors: boolean;
   diffColorPolarity: DiffColorPolarity;
+  windowOpacity: number;
   workspaceBranchPrefix: string;
   tilePickerVisibility: TilePickerVisibility;
 }
@@ -168,6 +171,7 @@ export function createDefaultAppSettings(debugLayout = false): AppSettings {
     tileSettings: createDefaultTileSettings(),
     deletionPositiveStatColors: false,
     diffColorPolarity: "standard",
+    windowOpacity: appWindowOpacityMax,
     workspaceBranchPrefix: "",
     tilePickerVisibility: createDefaultTilePickerVisibility(),
   };
@@ -220,6 +224,13 @@ export function normalizeAppSettings(value: Partial<AppSettings> | null | undefi
         ? value.deletionPositiveStatColors
         : defaults.deletionPositiveStatColors,
     diffColorPolarity: value?.diffColorPolarity === "reversed" ? "reversed" : "standard",
+    windowOpacity:
+      typeof value?.windowOpacity === "number" && Number.isFinite(value.windowOpacity)
+        ? Math.min(
+            appWindowOpacityMax,
+            Math.max(appWindowOpacityMin, Math.round(value.windowOpacity)),
+          )
+        : defaults.windowOpacity,
     workspaceBranchPrefix:
       typeof value?.workspaceBranchPrefix === "string" ? value.workspaceBranchPrefix : "",
     tilePickerVisibility: readTilePickerVisibility(
