@@ -106,6 +106,7 @@ class BrowserTerminalSessionRuntime implements TerminalSessionRuntime {
   private sessionId: string | null = null;
   private disposed = false;
   private resizeTimer: number | null = null;
+  private refreshFrame: number | null = null;
   private fontRefreshFrame: number | null = null;
   private onResumeAssigned: (resume: TileResumeMetadata) => void;
 
@@ -124,7 +125,7 @@ class BrowserTerminalSessionRuntime implements TerminalSessionRuntime {
 
     void onTerminalOutput((event) => {
       if (event.sessionId === this.sessionId) {
-        this.terminal.write(event.data);
+        this.terminal.write(event.data, () => this.scheduleRefresh());
       }
     }).then((disposeListener) => this.retainOrDisposeListener(disposeListener));
 
@@ -183,6 +184,7 @@ class BrowserTerminalSessionRuntime implements TerminalSessionRuntime {
     this.resizeObserver = new ResizeObserver(() => this.scheduleFitAndResize());
     this.resizeObserver.observe(host);
     this.fitAndResize();
+    this.scheduleRefresh();
   }
 
   detach(host: HTMLElement) {
@@ -250,6 +252,10 @@ class BrowserTerminalSessionRuntime implements TerminalSessionRuntime {
       window.clearTimeout(this.resizeTimer);
       this.resizeTimer = null;
     }
+    if (this.refreshFrame !== null) {
+      window.cancelAnimationFrame(this.refreshFrame);
+      this.refreshFrame = null;
+    }
     if (this.fontRefreshFrame !== null) {
       window.cancelAnimationFrame(this.fontRefreshFrame);
       this.fontRefreshFrame = null;
@@ -290,6 +296,7 @@ class BrowserTerminalSessionRuntime implements TerminalSessionRuntime {
     if (!this.host) return;
 
     this.fitAddon.fit();
+    this.scheduleRefresh();
     const nextDimensions = this.fitAddon.proposeDimensions();
     if (!this.sessionId || !nextDimensions) return;
 
@@ -297,6 +304,16 @@ class BrowserTerminalSessionRuntime implements TerminalSessionRuntime {
       sessionId: this.sessionId,
       cols: nextDimensions.cols,
       rows: nextDimensions.rows,
+    });
+  }
+
+  private scheduleRefresh() {
+    if (this.refreshFrame !== null) return;
+
+    this.refreshFrame = window.requestAnimationFrame(() => {
+      this.refreshFrame = null;
+      if (this.disposed) return;
+      this.terminal.refresh(0, this.terminal.rows - 1);
     });
   }
 }
