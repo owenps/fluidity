@@ -5,6 +5,10 @@ import type {
   WorkspaceOverview,
   WorkspaceCreateRequest,
   WorkspaceCreateResponse,
+  WorkspaceIntentCaptureRequest,
+  WorkspaceIntentCaptureResponse,
+  WorkspaceRenameRequest,
+  WorkspaceRenameResponse,
   WorkspaceSwitchRequest,
   WorkspaceSwitchResponse,
   WorkspaceTileStateSaveRequest,
@@ -20,6 +24,16 @@ export function saveWorkspaceTileState(request: WorkspaceTileStateSaveRequest): 
 
 export function createWorkspace(request: WorkspaceCreateRequest): Promise<WorkspaceCreateResponse> {
   return invoke<WorkspaceCreateResponse>("workspace_create", { request });
+}
+
+export function renameWorkspace(request: WorkspaceRenameRequest): Promise<WorkspaceRenameResponse> {
+  return invoke<WorkspaceRenameResponse>("workspace_rename", { request });
+}
+
+export function captureWorkspaceFirstIntent(
+  request: WorkspaceIntentCaptureRequest,
+): Promise<WorkspaceIntentCaptureResponse> {
+  return invoke<WorkspaceIntentCaptureResponse>("workspace_capture_first_intent", { request });
 }
 
 export function discardWorkspace(

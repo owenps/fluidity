@@ -30,9 +30,34 @@ The Global Settings Categories are:
 
 ### General
 
-General contains Debug mode and the global Danger Zone for Application Reset.
+General contains Workspace Branch Prefix, Auto-name Workspace Branches, Debug mode, and the global Danger Zone for Application Reset.
 
 Application Reset returns Fluidity to its unregistered starting state: Settings return to built-in defaults, Registered Projects and their Project Settings are removed, Open Workspaces and the Workspace Stack are cleared, and Fluidity-managed workspace roots are removed subject to dirty-workspace confirmation.
+
+### Workspace Branch Prefix
+
+User-facing label: **Workspace Branch Prefix**
+
+Description: **Prepended to generated Workspace Branch names.**
+
+Default: empty.
+
+The prefix applies to generated Workspace Branch names and to auto intent branch naming after the provider returns an unprefixed slug. Manual Workspace Branch rename input is the final branch name and is not prefixed automatically.
+
+### Auto-name Workspace Branches
+
+User-facing label: **Auto-name Workspace Branches**
+
+Description: **Rename new generated Workspace Branches from explicit first intent packets.**
+
+Default: disabled.
+
+Options:
+
+- **Disabled**: never auto-renames a Workspace Branch.
+- **Heuristic**: local deterministic slugging from issue title or first user message.
+
+Auto naming only runs for Git-backed Workspaces that receive an explicit Workspace Intent Packet. Fluidity never sniffs Terminal input. Providers return an unprefixed slug; Fluidity applies the effective Workspace Branch Prefix, validates the final branch with git rules and local uniqueness, and skips rather than inventing a suffix on collision.
 
 ### Appearance
 
@@ -118,6 +143,14 @@ Default: off.
 When enabled, explicit Workspace discard attempts to delete the local Workspace Branch after removing the Workspace/worktree. Fluidity uses safe branch deletion only (`git branch -d`), never force deletion (`-D`), and never deletes remote branches. If git refuses because the branch is not safe to delete, Workspace discard still succeeds and Fluidity shows a warning that the branch was kept. If the branch is already gone, no warning is needed.
 
 Branch deletion is skipped when the Project root is unavailable because Fluidity cannot safely ask git to delete the branch from the Project. Project Disconnect ignores this policy and never deletes branches.
+
+## Workspace Rename
+
+Command: **Rename Workspace…**
+
+For Git-backed Workspaces, Rename Workspace renames the current Workspace Branch and the visible Workspace name follows the branch. The git worktree path is not renamed. Input is the final branch name; Fluidity does not apply Workspace Branch Prefix to manual input.
+
+For Non-Git Workspaces, Rename Workspace changes the persisted Workspace label only.
 
 ## Project Search Settings
 

@@ -60,6 +60,8 @@ const NEW_WORKSPACE_MENU_ID: &str = "workspace.new";
 const NEW_WORKSPACE_EVENT: &str = "app://new-workspace";
 const DISCARD_WORKSPACE_MENU_ID: &str = "workspace.discard";
 const DISCARD_WORKSPACE_EVENT: &str = "app://discard-workspace";
+const RENAME_WORKSPACE_MENU_ID: &str = "workspace.rename";
+const RENAME_WORKSPACE_EVENT: &str = "app://rename-workspace";
 const COMMANDS_MANIFEST_JSON: &str = include_str!("../../src/commandsManifest.json");
 const APP_STATE_FILE: &str = "app-state.json";
 const APP_STATE_VERSION: u32 = 1;
@@ -154,6 +156,8 @@ struct AppSettings {
     window_opacity: f64,
     #[serde(default)]
     workspace_branch_prefix: String,
+    #[serde(default)]
+    branch_naming_provider: BranchNamingProvider,
     #[serde(default)]
     tile_picker_visibility: HashMap<String, bool>,
     #[serde(flatten)]
@@ -296,6 +300,14 @@ enum DiffColorPolarity {
     Reversed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum BranchNamingProvider {
+    #[default]
+    Disabled,
+    Heuristic,
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -308,6 +320,7 @@ impl Default for AppSettings {
             diff_color_polarity: DiffColorPolarity::default(),
             window_opacity: default_window_opacity(),
             workspace_branch_prefix: String::new(),
+            branch_naming_provider: BranchNamingProvider::Disabled,
             tile_picker_visibility: HashMap::new(),
             extra: HashMap::new(),
         }
@@ -352,10 +365,73 @@ struct OpenWorkspace {
     name: String,
     root: String,
     git_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    initial_generated_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    branch_history: Vec<WorkspaceBranchHistoryEvent>,
+    #[serde(
+        default,
+        skip_serializing_if = "WorkspaceAutoBranchNamingState::is_empty"
+    )]
+    auto_branch_naming: WorkspaceAutoBranchNamingState,
     tile_state: WorkspaceTileState,
     #[allow(dead_code)]
     #[serde(default, skip_serializing)]
     last_used_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceBranchHistoryEvent {
+    from: Option<String>,
+    to: String,
+    source: WorkspaceBranchChangeSource,
+    at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum WorkspaceBranchChangeSource {
+    Generated,
+    AutoIntent,
+    Manual,
+    ObservedExternal,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceAutoBranchNamingState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    intent_captured_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attempted_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider: Option<BranchNamingProvider>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    slug: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<AutoBranchNamingStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+impl WorkspaceAutoBranchNamingState {
+    fn is_empty(&self) -> bool {
+        self.intent_captured_at.is_none()
+            && self.attempted_at.is_none()
+            && self.provider.is_none()
+            && self.slug.is_none()
+            && self.status.is_none()
+            && self.reason.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum AutoBranchNamingStatus {
+    Renamed,
+    Skipped,
+    Failed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -724,10 +800,44 @@ struct WorkspaceCreateRequest {
     project_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceRenameRequest {
+    workspace_id: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceIntentCaptureRequest {
+    workspace_id: String,
+    first_user_message: String,
+    #[serde(default)]
+    selected_files: Vec<String>,
+    #[serde(default)]
+    issue_title: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceCreateResponse {
     current: CurrentWorkspaceResponse,
+    overview: WorkspaceOverview,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceRenameResponse {
+    current: Option<CurrentWorkspaceResponse>,
+    overview: WorkspaceOverview,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceIntentCaptureResponse {
+    current: Option<CurrentWorkspaceResponse>,
     overview: WorkspaceOverview,
     warnings: Vec<String>,
 }
@@ -827,13 +937,16 @@ enum ProjectKind {
 fn workspace_current(
     state: State<'_, WorkspaceState>,
 ) -> Result<Option<CurrentWorkspaceResponse>, String> {
-    let app_state = state.app_state.lock().map_err(lock_error)?;
+    let mut app_state = state.app_state.lock().map_err(lock_error)?;
+    refresh_workspace_branch_observations(&mut app_state);
+    state.save(&app_state)?;
     Ok(workspace_overview_for_state(&app_state).current)
 }
 
 #[tauri::command]
 fn workspace_overview(state: State<'_, WorkspaceState>) -> Result<WorkspaceOverview, String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
+    refresh_workspace_branch_observations(&mut app_state);
     normalize_workspace_stack(&mut app_state);
     state.save(&app_state)?;
     Ok(workspace_overview_for_state(&app_state))
@@ -1115,6 +1228,42 @@ async fn workspace_create(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn workspace_rename(
+    state: State<'_, WorkspaceState>,
+    request: WorkspaceRenameRequest,
+) -> Result<WorkspaceRenameResponse, String> {
+    let mut app_state = state.app_state.lock().map_err(lock_error)?;
+    let warnings = rename_workspace(&mut app_state, &request.workspace_id, &request.name)?;
+    refresh_workspace_branch_observations(&mut app_state);
+    normalize_workspace_stack(&mut app_state);
+    state.save(&app_state)?;
+    let overview = workspace_overview_for_state(&app_state);
+    Ok(WorkspaceRenameResponse {
+        current: overview.current.clone(),
+        overview,
+        warnings,
+    })
+}
+
+#[tauri::command]
+fn workspace_capture_first_intent(
+    state: State<'_, WorkspaceState>,
+    request: WorkspaceIntentCaptureRequest,
+) -> Result<WorkspaceIntentCaptureResponse, String> {
+    let mut app_state = state.app_state.lock().map_err(lock_error)?;
+    let warnings = capture_workspace_first_intent(&mut app_state, request)?;
+    refresh_workspace_branch_observations(&mut app_state);
+    normalize_workspace_stack(&mut app_state);
+    state.save(&app_state)?;
+    let overview = workspace_overview_for_state(&app_state);
+    Ok(WorkspaceIntentCaptureResponse {
+        current: overview.current.clone(),
+        overview,
+        warnings,
+    })
 }
 
 #[tauri::command]
@@ -1546,6 +1695,8 @@ pub fn run() {
             project_add,
             project_remove,
             workspace_create,
+            workspace_rename,
+            workspace_capture_first_intent,
             workspace_tile_state_save,
             code_file_read,
             code_file_write,
@@ -1584,6 +1735,9 @@ pub fn run() {
                 }
                 if event.id() == DISCARD_WORKSPACE_MENU_ID {
                     let _ = app.emit(DISCARD_WORKSPACE_EVENT, ());
+                }
+                if event.id() == RENAME_WORKSPACE_MENU_ID {
+                    let _ = app.emit(RENAME_WORKSPACE_EVENT, ());
                 }
             });
 
@@ -1652,6 +1806,14 @@ fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         None,
         discard_workspace_accelerator.as_deref(),
     )?;
+    let rename_workspace = IconMenuItem::with_id_and_native_icon(
+        app,
+        RENAME_WORKSPACE_MENU_ID,
+        "Rename Workspace…",
+        true,
+        None,
+        None::<&str>,
+    )?;
 
     Menu::with_items(
         app,
@@ -1682,6 +1844,7 @@ fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
                 &[
                     &new_workspace,
                     &discard_workspace,
+                    &rename_workspace,
                     &add_project,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::close_window(app, None)?,
@@ -1702,6 +1865,7 @@ fn build_app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
                 &[
                     &new_workspace,
                     &discard_workspace,
+                    &rename_workspace,
                     &add_project,
                     &PredefinedMenuItem::separator(app)?,
                     &settings,
@@ -1926,6 +2090,9 @@ fn home_workspace_for_project(project: &RegisteredProject) -> OpenWorkspace {
         name: "Home".to_string(),
         root: project.root.clone(),
         git_branch: None,
+        initial_generated_branch: None,
+        branch_history: Vec::new(),
+        auto_branch_naming: WorkspaceAutoBranchNamingState::default(),
         tile_state: default_workspace_tile_state(),
         last_used_at: now_unix_seconds(),
     }
@@ -1993,11 +2160,387 @@ fn create_git_workspace(
         project_id: project.id.clone(),
         name: git_branch.clone(),
         root: workspace_root_string,
-        git_branch: Some(git_branch),
+        git_branch: Some(git_branch.clone()),
+        initial_generated_branch: Some(git_branch.clone()),
+        branch_history: vec![WorkspaceBranchHistoryEvent {
+            from: None,
+            to: git_branch,
+            source: WorkspaceBranchChangeSource::Generated,
+            at: now_unix_seconds(),
+        }],
+        auto_branch_naming: WorkspaceAutoBranchNamingState::default(),
         tile_state: default_workspace_tile_state(),
         last_used_at: now_unix_seconds(),
     })
 }
+
+fn rename_workspace(
+    app_state: &mut PersistedAppState,
+    workspace_id: &str,
+    requested_name: &str,
+) -> Result<Vec<String>, String> {
+    let new_name = requested_name.trim();
+    if new_name.is_empty() {
+        return Err("Workspace name is required".to_string());
+    }
+
+    let workspace_index = app_state
+        .open_workspaces
+        .iter()
+        .position(|workspace| workspace.id == workspace_id)
+        .ok_or_else(|| "workspace not found".to_string())?;
+    let project = app_state
+        .projects
+        .iter()
+        .find(|project| project.id == app_state.open_workspaces[workspace_index].project_id)
+        .cloned()
+        .ok_or_else(|| "workspace project not found".to_string())?;
+
+    if project.kind != ProjectKind::Git {
+        app_state.open_workspaces[workspace_index].name = new_name.to_string();
+        return Ok(Vec::new());
+    }
+
+    let workspace_root = app_state.open_workspaces[workspace_index].root.clone();
+    if !Path::new(&workspace_root).is_dir() {
+        return Err("workspace root is missing".to_string());
+    }
+    let old_branch = observed_git_branch(ProjectKind::Git, &workspace_root)
+        .or_else(|| {
+            app_state.open_workspaces[workspace_index]
+                .git_branch
+                .clone()
+        })
+        .ok_or_else(|| "current Workspace Branch could not be determined".to_string())?;
+
+    validate_workspace_branch_rename(app_state, &workspace_root, &old_branch, new_name)?;
+    if old_branch != new_name {
+        run_git_command(
+            &workspace_root,
+            &["branch", "-m", "--", &old_branch, new_name],
+        )?;
+    }
+
+    let workspace = &mut app_state.open_workspaces[workspace_index];
+    workspace.git_branch = Some(new_name.to_string());
+    workspace.name = new_name.to_string();
+    if old_branch != new_name {
+        push_branch_history(
+            workspace,
+            Some(old_branch),
+            new_name.to_string(),
+            WorkspaceBranchChangeSource::Manual,
+        );
+    }
+    Ok(Vec::new())
+}
+
+fn capture_workspace_first_intent(
+    app_state: &mut PersistedAppState,
+    request: WorkspaceIntentCaptureRequest,
+) -> Result<Vec<String>, String> {
+    let provider = app_state.settings.branch_naming_provider.clone();
+    let workspace_index = app_state
+        .open_workspaces
+        .iter()
+        .position(|workspace| workspace.id == request.workspace_id)
+        .ok_or_else(|| "workspace not found".to_string())?;
+    let project = app_state
+        .projects
+        .iter()
+        .find(|project| project.id == app_state.open_workspaces[workspace_index].project_id)
+        .cloned()
+        .ok_or_else(|| "workspace project not found".to_string())?;
+
+    let captured_at = now_unix_seconds();
+    app_state.open_workspaces[workspace_index]
+        .auto_branch_naming
+        .intent_captured_at = Some(captured_at);
+
+    if provider == BranchNamingProvider::Disabled {
+        return Ok(Vec::new());
+    }
+    if project.kind != ProjectKind::Git {
+        record_auto_branch_naming_skip(
+            &mut app_state.open_workspaces[workspace_index],
+            provider,
+            None,
+            "Workspace is not Git-backed",
+        );
+        return Ok(Vec::new());
+    }
+    if app_state.open_workspaces[workspace_index]
+        .auto_branch_naming
+        .attempted_at
+        .is_some()
+    {
+        return Ok(Vec::new());
+    }
+
+    let slug = match provider {
+        BranchNamingProvider::Heuristic => heuristic_workspace_branch_slug(
+            request.issue_title.as_deref(),
+            &request.first_user_message,
+            &request.selected_files,
+        ),
+        BranchNamingProvider::Disabled => None,
+    };
+    let Some(slug) = slug else {
+        record_auto_branch_naming_skip(
+            &mut app_state.open_workspaces[workspace_index],
+            provider,
+            None,
+            "No branch slug could be generated",
+        );
+        return Ok(Vec::new());
+    };
+
+    let expected_branch = app_state.open_workspaces[workspace_index]
+        .initial_generated_branch
+        .clone()
+        .or_else(|| {
+            app_state.open_workspaces[workspace_index]
+                .git_branch
+                .clone()
+        })
+        .ok_or_else(|| "current Workspace Branch could not be determined".to_string())?;
+    let current_branch = observed_git_branch(
+        ProjectKind::Git,
+        &app_state.open_workspaces[workspace_index].root,
+    )
+    .or_else(|| {
+        app_state.open_workspaces[workspace_index]
+            .git_branch
+            .clone()
+    })
+    .ok_or_else(|| "current Workspace Branch could not be determined".to_string())?;
+    if current_branch != expected_branch {
+        record_auto_branch_naming_skip(
+            &mut app_state.open_workspaces[workspace_index],
+            provider,
+            Some(slug),
+            "Workspace Branch no longer matches generated branch",
+        );
+        return Ok(Vec::new());
+    }
+
+    let prefix = effective_workspace_branch_prefix(app_state, &project)?;
+    let final_branch = format!("{prefix}{slug}");
+    if let Err(reason) = validate_workspace_branch_rename(
+        app_state,
+        &app_state.open_workspaces[workspace_index].root,
+        &current_branch,
+        &final_branch,
+    ) {
+        record_auto_branch_naming_skip(
+            &mut app_state.open_workspaces[workspace_index],
+            provider,
+            Some(slug),
+            reason,
+        );
+        return Ok(Vec::new());
+    }
+
+    let workspace_root = app_state.open_workspaces[workspace_index].root.clone();
+    if let Err(reason) = run_git_command(
+        &workspace_root,
+        &["branch", "-m", "--", &current_branch, &final_branch],
+    ) {
+        record_auto_branch_naming_failed(
+            &mut app_state.open_workspaces[workspace_index],
+            provider,
+            Some(slug.clone()),
+            reason,
+        );
+        return Ok(Vec::new());
+    }
+
+    let workspace = &mut app_state.open_workspaces[workspace_index];
+    workspace.git_branch = Some(final_branch.clone());
+    workspace.name = final_branch.clone();
+    workspace.auto_branch_naming.attempted_at = Some(now_unix_seconds());
+    workspace.auto_branch_naming.provider = Some(provider);
+    workspace.auto_branch_naming.slug = Some(slug);
+    workspace.auto_branch_naming.status = Some(AutoBranchNamingStatus::Renamed);
+    workspace.auto_branch_naming.reason = None;
+    push_branch_history(
+        workspace,
+        Some(current_branch),
+        final_branch,
+        WorkspaceBranchChangeSource::AutoIntent,
+    );
+    Ok(Vec::new())
+}
+
+fn validate_workspace_branch_rename(
+    app_state: &PersistedAppState,
+    project_root: &str,
+    old_branch: &str,
+    new_branch: &str,
+) -> Result<(), String> {
+    if new_branch.trim().is_empty() {
+        return Err("Workspace Branch name is required".to_string());
+    }
+    if old_branch == new_branch {
+        return Ok(());
+    }
+    if !git_branch_name_is_valid(project_root, new_branch) {
+        return Err("Workspace Branch name is not a valid git branch name".to_string());
+    }
+    if local_git_branch_exists(project_root, new_branch) {
+        return Err("Workspace Branch already exists".to_string());
+    }
+    if app_state
+        .generated_workspace_branch_names
+        .iter()
+        .any(|branch| branch == new_branch)
+    {
+        return Err("Workspace Branch was already used as a generated branch".to_string());
+    }
+    Ok(())
+}
+
+fn record_auto_branch_naming_skip(
+    workspace: &mut OpenWorkspace,
+    provider: BranchNamingProvider,
+    slug: Option<String>,
+    reason: impl Into<String>,
+) {
+    workspace.auto_branch_naming.attempted_at = Some(now_unix_seconds());
+    workspace.auto_branch_naming.provider = Some(provider);
+    workspace.auto_branch_naming.slug = slug;
+    workspace.auto_branch_naming.status = Some(AutoBranchNamingStatus::Skipped);
+    workspace.auto_branch_naming.reason = Some(reason.into());
+}
+
+fn record_auto_branch_naming_failed(
+    workspace: &mut OpenWorkspace,
+    provider: BranchNamingProvider,
+    slug: Option<String>,
+    reason: impl Into<String>,
+) {
+    workspace.auto_branch_naming.attempted_at = Some(now_unix_seconds());
+    workspace.auto_branch_naming.provider = Some(provider);
+    workspace.auto_branch_naming.slug = slug;
+    workspace.auto_branch_naming.status = Some(AutoBranchNamingStatus::Failed);
+    workspace.auto_branch_naming.reason = Some(reason.into());
+}
+
+fn refresh_workspace_branch_observations(app_state: &mut PersistedAppState) {
+    let projects = app_state.projects.clone();
+    for workspace in &mut app_state.open_workspaces {
+        let Some(project) = projects
+            .iter()
+            .find(|project| project.id == workspace.project_id)
+        else {
+            continue;
+        };
+        if project.kind != ProjectKind::Git {
+            continue;
+        }
+        let Some(observed_branch) = observed_git_branch(ProjectKind::Git, &workspace.root) else {
+            continue;
+        };
+        if workspace.git_branch.as_deref() == Some(observed_branch.as_str()) {
+            workspace.name = observed_branch;
+            continue;
+        }
+        let previous_branch = workspace.git_branch.clone();
+        workspace.git_branch = Some(observed_branch.clone());
+        workspace.name = observed_branch.clone();
+        push_branch_history(
+            workspace,
+            previous_branch,
+            observed_branch,
+            WorkspaceBranchChangeSource::ObservedExternal,
+        );
+    }
+}
+
+fn push_branch_history(
+    workspace: &mut OpenWorkspace,
+    from: Option<String>,
+    to: String,
+    source: WorkspaceBranchChangeSource,
+) {
+    workspace.branch_history.push(WorkspaceBranchHistoryEvent {
+        from,
+        to,
+        source,
+        at: now_unix_seconds(),
+    });
+}
+
+fn heuristic_workspace_branch_slug(
+    issue_title: Option<&str>,
+    first_user_message: &str,
+    selected_files: &[String],
+) -> Option<String> {
+    let source = issue_title
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or(first_user_message);
+    let mut tokens = meaningful_slug_tokens(source);
+    if tokens.is_empty() {
+        tokens = selected_files
+            .iter()
+            .flat_map(|path| meaningful_slug_tokens(path))
+            .collect();
+    }
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let mut slug = String::new();
+    for token in tokens.into_iter().take(7) {
+        let next = if slug.is_empty() {
+            token
+        } else {
+            format!("{slug}-{token}")
+        };
+        if next.len() > 50 {
+            break;
+        }
+        slug = next;
+    }
+    if slug.is_empty() {
+        None
+    } else {
+        Some(slug)
+    }
+}
+
+fn meaningful_slug_tokens(value: &str) -> Vec<String> {
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .map(|token| token.to_ascii_lowercase())
+        .filter(|token| token.len() > 1)
+        .filter(|token| !WORKSPACE_BRANCH_SLUG_STOP_WORDS.contains(&token.as_str()))
+        .collect()
+}
+
+const WORKSPACE_BRANCH_SLUG_STOP_WORDS: &[&str] = &[
+    "about",
+    "add",
+    "after",
+    "and",
+    "are",
+    "can",
+    "could",
+    "for",
+    "from",
+    "help",
+    "into",
+    "make",
+    "please",
+    "should",
+    "that",
+    "the",
+    "this",
+    "through",
+    "to",
+    "with",
+    "workspace",
+];
 
 fn copy_configured_workspace_files(
     project_root: &Path,
@@ -3191,6 +3734,12 @@ fn git_branch_name_is_valid(root: &str, branch: &str) -> bool {
     git_command_succeeds(root, &["check-ref-format", "--branch", branch]).unwrap_or(false)
 }
 
+fn local_git_branch_exists(root: &str, branch: &str) -> bool {
+    local_git_branch_names(root)
+        .map(|branches| branches.contains(branch))
+        .unwrap_or(false)
+}
+
 fn local_git_branch_names(root: &str) -> Result<HashSet<String>, String> {
     let branches = run_git_command(root, &["branch", "--format", "%(refname:short)"])?;
     Ok(branches
@@ -4198,6 +4747,9 @@ mod tests {
             name: "Other".to_string(),
             root: other_project.root.clone(),
             git_branch: None,
+            initial_generated_branch: None,
+            branch_history: Vec::new(),
+            auto_branch_naming: WorkspaceAutoBranchNamingState::default(),
             tile_state: default_workspace_tile_state(),
             last_used_at: 0,
         };
@@ -4501,6 +5053,9 @@ mod tests {
                 name: "Home".to_string(),
                 root: path_to_string(&project_root),
                 git_branch: None,
+                initial_generated_branch: None,
+                branch_history: Vec::new(),
+                auto_branch_naming: WorkspaceAutoBranchNamingState::default(),
                 tile_state: default_workspace_tile_state(),
                 last_used_at: 0,
             }],
@@ -4708,6 +5263,9 @@ mod tests {
                 name: "Project".to_string(),
                 root: project_root.to_string_lossy().to_string(),
                 git_branch: None,
+                initial_generated_branch: None,
+                branch_history: Vec::new(),
+                auto_branch_naming: WorkspaceAutoBranchNamingState::default(),
                 tile_state: default_workspace_tile_state(),
                 last_used_at: 0,
             }],
@@ -4828,6 +5386,9 @@ mod tests {
                 name: "Project".to_string(),
                 root: project_root.to_string_lossy().to_string(),
                 git_branch: None,
+                initial_generated_branch: None,
+                branch_history: Vec::new(),
+                auto_branch_naming: WorkspaceAutoBranchNamingState::default(),
                 tile_state: default_workspace_tile_state(),
                 last_used_at: 0,
             }],
@@ -4955,6 +5516,9 @@ mod tests {
             name: branch.to_string(),
             root: project.root.clone(),
             git_branch: Some(branch.to_string()),
+            initial_generated_branch: Some(branch.to_string()),
+            branch_history: Vec::new(),
+            auto_branch_naming: WorkspaceAutoBranchNamingState::default(),
             tile_state: default_workspace_tile_state(),
             last_used_at: 0,
         }
@@ -4985,6 +5549,9 @@ mod tests {
             name: id.to_string(),
             root: "/tmp/fluidity-test".to_string(),
             git_branch: None,
+            initial_generated_branch: None,
+            branch_history: Vec::new(),
+            auto_branch_naming: WorkspaceAutoBranchNamingState::default(),
             tile_state: default_workspace_tile_state(),
             last_used_at,
         }

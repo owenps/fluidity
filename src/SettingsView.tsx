@@ -1,6 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { APP_NAME } from "./appConstants";
 import {
   appWindowOpacityMax,
   appWindowOpacityMin,
@@ -28,6 +27,7 @@ import {
   type TilePickerVisibility,
 } from "./tilePickerCatalog";
 import type {
+  BranchNamingProvider,
   ExtensionDiagnostic,
   ExtensionSettingsEntry,
   ExtensionSettingsResponse,
@@ -80,6 +80,8 @@ interface SettingsViewProps {
   onWindowOpacityChange: (opacity: number) => void;
   workspaceBranchPrefix: string;
   onWorkspaceBranchPrefixChange: (prefix: string) => void;
+  branchNamingProvider: BranchNamingProvider;
+  onBranchNamingProviderChange: (provider: BranchNamingProvider) => void;
   tilePickerVisibility: TilePickerVisibility;
   configurableTilePickerItems: ConfigurableTilePickerCatalogItem[];
   toolAvailabilityByPickerItemId: Map<string, ToolAvailability>;
@@ -192,7 +194,12 @@ function controlIdsForSelection(
 ) {
   if (scope === "global") {
     if (globalCategory === "general") {
-      return ["workspace-branch-prefix", "debug-layout", "reset-application"];
+      return [
+        "workspace-branch-prefix",
+        "branch-naming-provider",
+        "debug-layout",
+        "reset-application",
+      ];
     }
     if (globalCategory === "appearance") {
       return ["app-theme", "tile-headers", "diff-color-polarity", "window-opacity"];
@@ -243,6 +250,8 @@ export function SettingsView({
   onWindowOpacityChange,
   workspaceBranchPrefix,
   onWorkspaceBranchPrefixChange,
+  branchNamingProvider,
+  onBranchNamingProviderChange,
   tilePickerVisibility,
   configurableTilePickerItems,
   toolAvailabilityByPickerItemId,
@@ -267,6 +276,7 @@ export function SettingsView({
   const themeRef = useRef<HTMLSelectElement | null>(null);
   const diffColorPolarityRef = useRef<HTMLSelectElement | null>(null);
   const workspaceBranchPrefixRef = useRef<HTMLInputElement | null>(null);
+  const branchNamingProviderRef = useRef<HTMLSelectElement | null>(null);
   const projectWorkspaceBranchPrefixRef = useRef<HTMLInputElement | null>(null);
   const workspaceCopyFilesRef = useRef<HTMLTextAreaElement | null>(null);
   const projectSearchIncludesRef = useRef<HTMLTextAreaElement | null>(null);
@@ -609,6 +619,10 @@ export function SettingsView({
     }
     if (activeControlId === "workspace-branch-prefix") {
       workspaceBranchPrefixRef.current?.focus();
+      return;
+    }
+    if (activeControlId === "branch-naming-provider") {
+      branchNamingProviderRef.current?.focus();
       return;
     }
     if (activeControlId === "project-workspace-branch-prefix") {
@@ -980,6 +994,7 @@ export function SettingsView({
           </span>
         </div>
         {renderWorkspaceBranchPrefixControl()}
+        {renderBranchNamingProviderControl()}
         {renderToggleRow({
           id: "debug-layout",
           title: "Debug mode",
@@ -991,8 +1006,9 @@ export function SettingsView({
           <span className="settings-section-title">Danger Zone</span>
           {renderActionRow({
             id: "reset-application",
-            title: `Reset ${APP_NAME}`,
-            description: `Disconnect all projects, close workspaces, remove ${APP_NAME}-managed workspace roots, and reset settings.`,
+            title: "Reset application",
+            description:
+              "Disconnect all projects, close workspaces, remove managed workspace roots, and reset settings.",
             action: pendingReset ? "Confirm reset" : "Reset",
             danger: true,
             onClick: confirmResetApplication,
@@ -1027,6 +1043,38 @@ export function SettingsView({
             onFocus={() => setActiveControlId("workspace-branch-prefix")}
             onChange={(event) => onWorkspaceBranchPrefixChange(event.currentTarget.value)}
           />
+        </span>
+      </label>
+    );
+  }
+
+  function renderBranchNamingProviderControl() {
+    const active = activeControlId === "branch-naming-provider" && focusPane === "right";
+
+    return (
+      <label
+        className={["settings-row", active ? "settings-row-active" : ""].join(" ")}
+        onClick={() => setActiveControlId("branch-naming-provider")}
+      >
+        <span className="settings-row-copy">
+          <span className="settings-row-title">Auto-name Workspace Branches</span>
+          <span className="settings-row-description">
+            Rename new generated Workspace Branches from explicit first intent packets.
+          </span>
+        </span>
+        <span className="settings-row-control">
+          <select
+            ref={branchNamingProviderRef}
+            className="settings-select-control"
+            value={branchNamingProvider}
+            onFocus={() => setActiveControlId("branch-naming-provider")}
+            onChange={(event) =>
+              onBranchNamingProviderChange(event.currentTarget.value as BranchNamingProvider)
+            }
+          >
+            <option value="disabled">Disabled</option>
+            <option value="heuristic">Heuristic</option>
+          </select>
         </span>
       </label>
     );
@@ -1103,14 +1151,14 @@ export function SettingsView({
         </label>
         {renderNumberSliderRow({
           id: "window-opacity",
-          title: "Application opacity",
-          description: "Fade the whole Fluidity window.",
+          title: "Window opacity",
+          description: "Fade the whole window.",
           value: windowOpacity,
           min: appWindowOpacityMin,
           max: appWindowOpacityMax,
           step: appWindowOpacityStep,
           suffix: "%",
-          ariaLabel: "Application opacity",
+          ariaLabel: "Window opacity",
           onChange: onWindowOpacityChange,
         })}
       </div>
@@ -1673,7 +1721,7 @@ export function SettingsView({
         {renderActionRow({
           id: "disconnect-project",
           title: "Disconnect Project",
-          description: `Remove ${selectedProject.name} from ${APP_NAME} without deleting its Project root or branches.`,
+          description: `Remove ${selectedProject.name} without deleting its Project root or branches.`,
           action:
             pendingProjectRemovalId === selectedProject.id ? "Confirm disconnect" : "Disconnect",
           danger: true,

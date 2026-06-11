@@ -57,7 +57,7 @@ import {
   insertTextIntoTerminalSessionRuntime,
 } from "./terminalSessionRuntime";
 import { ToastStack, type AppToast } from "./ToastStack";
-import { checkForAvailableUpdate, relaunchApplication } from "./updateClient";
+import { checkForAvailableUpdate, relaunchApplication, type AvailableUpdate } from "./updateClient";
 import { WorkspaceTile } from "./WorkspaceTile";
 import {
   closeTile,
@@ -99,6 +99,7 @@ import {
   createWorkspace,
   discardWorkspace,
   getWorkspaceOverview,
+  renameWorkspace,
   saveWorkspaceTileState,
   switchWorkspace,
 } from "./workspaceClient";
@@ -374,6 +375,7 @@ export function App() {
     diffColorPolarity,
     windowOpacity,
     workspaceBranchPrefix,
+    branchNamingProvider,
     tilePickerVisibility,
   } = settings;
   const layoutRef = useRef(layout);
@@ -383,7 +385,9 @@ export function App() {
   const previousTileRuntimeOwnersRef = useRef<{ workspaceId: string | null; tileIds: Set<string> }>(
     { workspaceId: null, tileIds: new Set() },
   );
+  const updateCheckInFlightRef = useRef(false);
   const updateInstallInFlightRef = useRef(false);
+  const announcedUpdateVersionRef = useRef<string | null>(null);
   const [resolvedThemeId, setResolvedThemeId] = useState(() => resolveThemeId(themeId));
 
   useEffect(() => {
@@ -525,66 +529,80 @@ export function App() {
     [dismissToast],
   );
 
-  useEffect(() => {
-    void checkForAvailableUpdate()
-      .then((update) => {
-        if (!update) return;
+  const announceUpdate = useCallback(
+    (update: AvailableUpdate) => {
+      if (announcedUpdateVersionRef.current === update.version) return;
+      announcedUpdateVersionRef.current = update.version;
 
-        const installUpdate = () => {
-          if (updateInstallInFlightRef.current) return;
-          updateInstallInFlightRef.current = true;
-          addToast({
-            severity: "info",
-            title: "Installing update",
-            detail: `Downloading Fluidity ${update.version}…`,
-            autoDismiss: false,
-          });
-
-          void update
-            .install()
-            .then(() => {
-              addToast({
-                severity: "success",
-                title: "Update installed",
-                detail: "Restart Fluidity to finish.",
-                autoDismiss: false,
-                actions: [
-                  {
-                    label: "Restart",
-                    variant: "primary",
-                    onClick: () => {
-                      void relaunchApplication();
-                    },
-                  },
-                ],
-              });
-            })
-            .catch((error) => {
-              updateInstallInFlightRef.current = false;
-              addToast({
-                severity: "error",
-                title: "Update failed",
-                detail: String(error),
-              });
-            });
-        };
-
+      const restartWithUpdate = () => {
+        if (updateInstallInFlightRef.current) return;
+        updateInstallInFlightRef.current = true;
         addToast({
           severity: "info",
-          title: `Fluidity ${update.version} available`,
-          detail: update.notes ?? "A new Fluidity release is ready to install.",
+          title: "Installing update",
+          detail: `Downloading Fluidity ${update.version}…`,
           autoDismiss: false,
-          actions: [
-            { label: "Update", variant: "primary", onClick: installUpdate },
-            {
-              label: "Release notes",
-              onClick: () => window.open(update.notesUrl, "_blank", "noopener,noreferrer"),
-            },
-          ],
         });
+
+        void update
+          .install()
+          .then(() => relaunchApplication())
+          .catch((error) => {
+            updateInstallInFlightRef.current = false;
+            addToast({
+              severity: "error",
+              title: "Update failed",
+              detail: String(error),
+            });
+          });
+      };
+
+      addToast({
+        severity: "info",
+        title: "Update available",
+        detail: `Fluidity ${update.version} is ready to install.`,
+        autoDismiss: false,
+        actions: [
+          {
+            label: "See Changes",
+            onClick: () => window.open(update.notesUrl, "_blank", "noopener,noreferrer"),
+          },
+          { label: "Restart", variant: "primary", onClick: restartWithUpdate },
+        ],
+      });
+    },
+    [addToast],
+  );
+
+  const checkForUpdates = useCallback(() => {
+    if (updateCheckInFlightRef.current || updateInstallInFlightRef.current) return;
+    updateCheckInFlightRef.current = true;
+
+    void checkForAvailableUpdate()
+      .then((update) => {
+        if (update) announceUpdate(update);
+      })
+      .catch(() => {})
+      .finally(() => {
+        updateCheckInFlightRef.current = false;
+      });
+  }, [announceUpdate]);
+
+  useEffect(() => {
+    checkForUpdates();
+
+    let unlisten: UnlistenFn | null = null;
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) checkForUpdates();
+      })
+      .then((dispose) => {
+        unlisten = dispose;
       })
       .catch(() => {});
-  }, [addToast]);
+
+    return () => unlisten?.();
+  }, [checkForUpdates]);
 
   const addWarningToasts = useCallback(
     (warnings: string[]) => {
@@ -1121,6 +1139,38 @@ export function App() {
     runDiscardWorkspace(currentWorkspaceId);
   }, [currentWorkspaceDiscardable, currentWorkspaceId, runDiscardWorkspace]);
 
+  const runRenameCurrentWorkspace = useCallback(() => {
+    if (!currentWorkspaceId || !context) return;
+    const currentName = context.gitBranch ?? context.workspace.name;
+    const promptTitle =
+      context.project.kind === "git" ? "Rename Workspace Branch" : "Rename Workspace";
+    const nextName = window.prompt(promptTitle, currentName);
+    if (nextName === null) return;
+    const name = nextName.trim();
+    if (!name || name === currentName) return;
+
+    void renameWorkspace({ workspaceId: currentWorkspaceId, name })
+      .then((response) => {
+        applyWorkspaceOverview(response.overview);
+        addWarningToasts(response.warnings);
+        addToast({
+          severity: "success",
+          title: context.project.kind === "git" ? "Workspace Branch renamed" : "Workspace renamed",
+          detail: name,
+        });
+      })
+      .catch((error) => {
+        addToast({
+          severity: "error",
+          title:
+            context.project.kind === "git"
+              ? "Could not rename Workspace Branch"
+              : "Could not rename Workspace",
+          detail: String(error),
+        });
+      });
+  }, [addToast, addWarningToasts, applyWorkspaceOverview, context, currentWorkspaceId]);
+
   const loadProjectFileIndex = useCallback(() => {
     if (!currentWorkspaceId) {
       setProjectFileItems([]);
@@ -1271,6 +1321,7 @@ export function App() {
       reloadExtensions,
       addProject: runAddProject,
       discardWorkspace: runDiscardCurrentWorkspace,
+      renameWorkspace: runRenameCurrentWorkspace,
       closeFocusedTile: closeFocusedTileGuarded,
       closeFocusedItem,
     }),
@@ -1282,6 +1333,7 @@ export function App() {
       reloadExtensions,
       runAddProject,
       runDiscardCurrentWorkspace,
+      runRenameCurrentWorkspace,
     ],
   );
 
@@ -1324,8 +1376,20 @@ export function App() {
       })
       .catch(() => {});
 
+    void listen("app://rename-workspace", runRenameCurrentWorkspace)
+      .then((unlistenRenameWorkspaceEvent) => {
+        unlistenFns.push(unlistenRenameWorkspaceEvent);
+      })
+      .catch(() => {});
+
     return () => unlistenFns.forEach((unlisten) => unlisten());
-  }, [openSettingsView, reloadExtensions, runAddProject, runDiscardCurrentWorkspace]);
+  }, [
+    openSettingsView,
+    reloadExtensions,
+    runAddProject,
+    runDiscardCurrentWorkspace,
+    runRenameCurrentWorkspace,
+  ]);
 
   useEffect(() => {
     if (!contextLoaded || !currentWorkspaceId) return;
@@ -1505,6 +1569,12 @@ export function App() {
 
   const setWorkspaceBranchPrefixSetting = (workspaceBranchPrefix: string) => {
     updateSettings((previous) => ({ ...previous, workspaceBranchPrefix }));
+  };
+
+  const setBranchNamingProviderSetting = (
+    branchNamingProvider: AppSettings["branchNamingProvider"],
+  ) => {
+    updateSettings((previous) => ({ ...previous, branchNamingProvider }));
   };
 
   const setTilePickerItemVisibility = (itemId: ConfigurableTilePickerItemId, visible: boolean) => {
@@ -1978,6 +2048,8 @@ export function App() {
           onWindowOpacityChange={setWindowOpacitySetting}
           workspaceBranchPrefix={workspaceBranchPrefix}
           onWorkspaceBranchPrefixChange={setWorkspaceBranchPrefixSetting}
+          branchNamingProvider={branchNamingProvider}
+          onBranchNamingProviderChange={setBranchNamingProviderSetting}
           tilePickerVisibility={tilePickerVisibility}
           configurableTilePickerItems={configurableTilePickerItems}
           toolAvailabilityByPickerItemId={toolAvailabilityByPickerItemId}

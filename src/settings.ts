@@ -7,6 +7,7 @@ import {
 import type {
   CodeEditorSettings,
   DiffTileSettings,
+  BranchNamingProvider,
   NotepadTileSettings,
   TerminalTileSettings,
   TileSettings,
@@ -32,6 +33,7 @@ export interface AppSettings {
   diffColorPolarity: DiffColorPolarity;
   windowOpacity: number;
   workspaceBranchPrefix: string;
+  branchNamingProvider: BranchNamingProvider;
   tilePickerVisibility: TilePickerVisibility;
 }
 
@@ -173,6 +175,7 @@ export function createDefaultAppSettings(debugLayout = false): AppSettings {
     diffColorPolarity: "standard",
     windowOpacity: appWindowOpacityMax,
     workspaceBranchPrefix: "",
+    branchNamingProvider: "disabled",
     tilePickerVisibility: createDefaultTilePickerVisibility(),
   };
 }
@@ -233,6 +236,10 @@ export function normalizeAppSettings(value: Partial<AppSettings> | null | undefi
         : defaults.windowOpacity,
     workspaceBranchPrefix:
       typeof value?.workspaceBranchPrefix === "string" ? value.workspaceBranchPrefix : "",
+    branchNamingProvider:
+      value?.branchNamingProvider === "heuristic"
+        ? value.branchNamingProvider
+        : defaults.branchNamingProvider,
     tilePickerVisibility: readTilePickerVisibility(
       value?.tilePickerVisibility,
       defaults.tilePickerVisibility,

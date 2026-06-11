@@ -142,6 +142,7 @@ export type Tile =
   | NotepadWorkspaceTile;
 
 export type ProjectKind = "git" | "plain";
+export type BranchNamingProvider = "disabled" | "heuristic";
 
 export interface ProjectSettings {
   deleteWorkspaceBranchOnDiscard: boolean;
@@ -227,8 +228,32 @@ export interface WorkspaceCreateRequest {
   projectId: string;
 }
 
+export interface WorkspaceRenameRequest {
+  workspaceId: string;
+  name: string;
+}
+
+export interface WorkspaceIntentCaptureRequest {
+  workspaceId: string;
+  firstUserMessage: string;
+  selectedFiles?: string[];
+  issueTitle?: string | null;
+}
+
 export interface WorkspaceCreateResponse {
   current: CurrentWorkspaceResponse;
+  overview: WorkspaceOverview;
+  warnings: string[];
+}
+
+export interface WorkspaceRenameResponse {
+  current: CurrentWorkspaceResponse | null;
+  overview: WorkspaceOverview;
+  warnings: string[];
+}
+
+export interface WorkspaceIntentCaptureResponse {
+  current: CurrentWorkspaceResponse | null;
   overview: WorkspaceOverview;
   warnings: string[];
 }

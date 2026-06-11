@@ -53,12 +53,20 @@ An Open Workspace with activity the user has not viewed since it happened.
 _Avoid_: Active workspace, unseen workspace
 
 **Workspace Branch**:
-The branch currently checked out in a Git-backed Workspace and used as the change surface for that stream of work, even if renamed after Workspace creation. Fluidity-generated Workspace Branch names are unique across Fluidity and are not reused after discard.
+The branch currently checked out in a Git-backed Workspace and used as the change surface for that stream of work, even if renamed after Workspace creation. For Git-backed Workspaces, the Workspace Branch is the source of the visible Workspace name; the git worktree path is not renamed. Fluidity-generated Workspace Branch names are unique across Fluidity and are not reused after discard.
 _Avoid_: Feature branch, task branch
 
 **Workspace Branch Prefix**:
-Optional user- or project-chosen text prepended to generated Workspace Branch names; the default is no prefix.
+Optional user- or project-chosen text prepended to generated Workspace Branch names; the default is no prefix. Manual Workspace Branch rename input is always the final branch name and does not receive this prefix automatically.
 _Avoid_: Fluidity prefix, branch namespace
+
+**Workspace Branch Naming Provider**:
+A Setting that controls whether Fluidity may auto-rename a generated Workspace Branch from an explicit first user intent packet. Disabled means no auto rename. Heuristic means local deterministic slugging. Providers return an unprefixed slug; Fluidity applies the effective Workspace Branch Prefix and validates the final branch before rename.
+_Avoid_: Branch AI, auto title
+
+**Workspace Intent Packet**:
+Explicit structured startup context supplied by an agent or tool integration for a new Workspace, including project name, base branch, temporary branch, first user message, selected files, and optional issue title. Fluidity does not infer this by sniffing Terminal input.
+_Avoid_: Terminal history, prompt scrape
 
 **Workspace Branch Discard Policy**:
 A Project Setting that controls whether discarding a Git-backed Workspace also deletes its local Workspace Branch when safe; the default is to keep the branch. Remote branches are outside this policy.
@@ -69,7 +77,7 @@ The branch or remote-tracking ref used as the starting point for a new Git-backe
 _Avoid_: Starting branch, parent branch, source branch
 
 **Home Workspace**:
-The initial Workspace for a Project that is not backed by git, rooted at the Project root.
+The initial Workspace for a Project that is not backed by git, rooted at the Project root. For Non-Git Workspaces, the persisted Workspace label is the source of the visible Workspace name.
 _Avoid_: Main workspace, default workspace
 
 **Discarded Workspace**:

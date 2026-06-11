@@ -55,6 +55,10 @@
     "nativeAccelerator": "Cmd+Shift+Backspace"
   },
   {
+    "id": "workspace.rename",
+    "title": "Rename Workspace…"
+  },
+  {
     "id": "projectSearch.open",
     "title": "Search Project Files",
     "shortcutGroup": "General",

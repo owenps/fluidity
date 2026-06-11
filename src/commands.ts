@@ -29,6 +29,7 @@ export interface AppCommandApi {
   reloadExtensions: () => void;
   addProject: () => void;
   discardWorkspace: () => void;
+  renameWorkspace: () => void;
   closeFocusedTile: () => void;
   closeFocusedItem: () => void;
 }
@@ -153,6 +154,13 @@ function behaviorForCommand(commandId: string): Pick<Command, "canRun" | "run"> 
     return {
       canRun: () => true,
       run: (api) => api.discardWorkspace(),
+    };
+  }
+
+  if (commandId === "workspace.rename") {
+    return {
+      canRun: () => true,
+      run: (api) => api.renameWorkspace(),
     };
   }
 
