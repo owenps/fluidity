@@ -148,6 +148,8 @@ export interface ProjectSettings {
   deleteWorkspaceBranchOnDiscard: boolean;
   workspaceBranchPrefix: string | null;
   workspaceCopyFiles: string[];
+  workspaceSetupScript: string;
+  workspaceDiscardScript: string;
   projectSearchIncludePaths: string[];
   projectSearchExcludePaths: string[];
 }

@@ -337,6 +337,10 @@ struct ProjectSettings {
     #[serde(default)]
     workspace_copy_files: Vec<String>,
     #[serde(default)]
+    workspace_setup_script: String,
+    #[serde(default)]
+    workspace_discard_script: String,
+    #[serde(default)]
     project_search_include_paths: Vec<String>,
     #[serde(default)]
     project_search_exclude_paths: Vec<String>,
@@ -2155,7 +2159,7 @@ fn create_git_workspace(
     let git_branch = observed_git_branch(ProjectKind::Git, &workspace_root_string)
         .unwrap_or_else(|| branch.clone());
 
-    Ok(OpenWorkspace {
+    let workspace = OpenWorkspace {
         id: workspace_id,
         project_id: project.id.clone(),
         name: git_branch.clone(),
@@ -2171,7 +2175,113 @@ fn create_git_workspace(
         auto_branch_naming: WorkspaceAutoBranchNamingState::default(),
         tile_state: default_workspace_tile_state(),
         last_used_at: now_unix_seconds(),
-    })
+    };
+
+    run_workspace_setup_script(project, &workspace, warnings);
+
+    Ok(workspace)
+}
+
+fn run_workspace_setup_script(
+    project: &RegisteredProject,
+    workspace: &OpenWorkspace,
+    warnings: &mut Vec<String>,
+) {
+    if let Err(error) = run_workspace_lifecycle_script(
+        project,
+        workspace,
+        &project.settings.workspace_setup_script,
+        "setup",
+    ) {
+        warnings.push(error);
+    }
+}
+
+fn run_workspace_discard_script(
+    target: &workspace_removal::WorkspaceCleanupTarget,
+    warnings: &mut Vec<String>,
+) {
+    if let Err(error) = run_workspace_lifecycle_script(
+        &target.project,
+        &target.workspace,
+        &target.project.settings.workspace_discard_script,
+        "discard",
+    ) {
+        warnings.push(error);
+    }
+}
+
+fn run_workspace_lifecycle_script(
+    project: &RegisteredProject,
+    workspace: &OpenWorkspace,
+    script: &str,
+    phase: &str,
+) -> Result<(), String> {
+    if script.trim().is_empty() {
+        return Ok(());
+    }
+
+    let workspace_root = Path::new(&workspace.root);
+    if !workspace_root.is_dir() {
+        return Err(format!(
+            "Workspace {phase} script for {} was skipped because the Workspace root is missing.",
+            workspace.name
+        ));
+    }
+
+    let environment = resolve_for_cwd(workspace_root);
+    let mut command = Command::new(&environment.shell);
+    command
+        .arg("-lc")
+        .arg(script)
+        .current_dir(workspace_root)
+        .envs(environment.variables)
+        .env("FLUIDITY_PROJECT_ROOT", &project.root)
+        .env("FLUIDITY_PROJECT_ID", &project.id)
+        .env("FLUIDITY_PROJECT_NAME", &project.name)
+        .env("FLUIDITY_WORKSPACE_ROOT", &workspace.root)
+        .env("FLUIDITY_WORKSPACE_ID", &workspace.id)
+        .env("FLUIDITY_WORKSPACE_NAME", &workspace.name);
+    if let Some(branch) = workspace.git_branch.as_deref() {
+        command.env("FLUIDITY_WORKSPACE_BRANCH", branch);
+    }
+
+    let output = command.output().map_err(|error| {
+        format!(
+            "Workspace {phase} script for {} could not start: {error}.",
+            workspace.name
+        )
+    })?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Workspace {phase} script for {} failed with status {}: {}",
+        workspace.name,
+        output
+            .status
+            .code()
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        lifecycle_script_output_summary(&output.stdout, &output.stderr)
+    ))
+}
+
+fn lifecycle_script_output_summary(stdout: &[u8], stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(stdout).trim().to_string();
+    let output = if stderr.is_empty() { stdout } else { stderr };
+    let output = output.replace('\n', " ");
+    if output.is_empty() {
+        return "no output".to_string();
+    }
+    if output.chars().count() <= 300 {
+        output
+    } else {
+        format!("{}…", output.chars().take(300).collect::<String>())
+    }
 }
 
 fn rename_workspace(
@@ -2239,7 +2349,7 @@ fn capture_workspace_first_intent(
     app_state: &mut PersistedAppState,
     request: WorkspaceIntentCaptureRequest,
 ) -> Result<Vec<String>, String> {
-    let provider = app_state.settings.branch_naming_provider.clone();
+    let provider = app_state.settings.branch_naming_provider;
     let workspace_index = app_state
         .open_workspaces
         .iter()
@@ -3316,6 +3426,8 @@ mod workspace_removal {
             return Err("workspace root is not managed by Fluidity".to_string());
         }
 
+        run_workspace_discard_script(target, warnings);
+
         if Path::new(&target.project.root).is_dir() {
             let mut args = vec!["worktree", "remove"];
             if force {
@@ -4272,7 +4384,7 @@ mod tests {
     }
 
     #[test]
-    fn git_workspace_creation_copies_configured_project_files() {
+    fn git_workspace_creation_copies_configured_project_files_and_runs_setup_script() {
         let temp_dir = test_temp_dir("fluidity-workspace-copy-create");
         let app_data_dir = temp_dir.join("app-data");
         let project_root = temp_dir.join("project");
@@ -4322,6 +4434,8 @@ mod tests {
             kind: ProjectKind::Git,
             settings: ProjectSettings {
                 workspace_copy_files: vec![".env".to_string(), "local/reference.txt".to_string()],
+                workspace_setup_script:
+                    "printf '%s' \"$FLUIDITY_WORKSPACE_BRANCH\" > setup-ran.txt".to_string(),
                 ..ProjectSettings::default()
             },
         };
@@ -4340,6 +4454,10 @@ mod tests {
         assert_eq!(
             fs::read_to_string(workspace_root.join("local").join("reference.txt")).unwrap(),
             "reference\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace_root.join("setup-ran.txt")).unwrap(),
+            workspace.git_branch.unwrap()
         );
 
         let _ = fs::remove_dir_all(temp_dir);
@@ -4694,9 +4812,30 @@ mod tests {
     }
 
     #[test]
-    fn workspace_discard_removes_state_stack_and_root() {
-        let (temp_dir, app_data_dir, project, workspace) =
-            test_git_project_with_workspace("fluidity-discard-clean", ProjectSettings::default());
+    fn workspace_discard_removes_state_stack_root_and_runs_discard_script() {
+        let temp_dir = test_temp_dir("fluidity-discard-clean");
+        let marker_path = temp_dir.join("discard-ran.txt");
+        let settings = ProjectSettings {
+            workspace_discard_script: format!(
+                "printf '%s' \"$FLUIDITY_WORKSPACE_ID\" > {}",
+                marker_path.display()
+            ),
+            ..ProjectSettings::default()
+        };
+        let app_data_dir = temp_dir.join("app-data");
+        let project_root = temp_dir.join("project");
+        setup_git_project_root(&project_root);
+        fs::create_dir_all(&app_data_dir).unwrap();
+        let project = test_registered_project("project-1", &project_root, settings);
+        let mut workspace_app_state = PersistedAppState::default();
+        let mut warnings = Vec::new();
+        let workspace = create_git_workspace(
+            &app_data_dir,
+            &mut workspace_app_state,
+            &project,
+            &mut warnings,
+        )
+        .unwrap();
         let mut app_state = test_app_state_with_stack(
             vec![project],
             vec![workspace.clone()],
@@ -4719,6 +4858,7 @@ mod tests {
         assert!(app_state.open_workspaces.is_empty());
         assert!(app_state.workspace_stack.is_empty());
         assert!(!Path::new(&workspace.root).exists());
+        assert_eq!(fs::read_to_string(marker_path).unwrap(), workspace.id);
 
         let _ = fs::remove_dir_all(temp_dir);
     }

@@ -226,6 +226,8 @@ function controlIdsForSelection(
       ? [
           "project-workspace-branch-prefix",
           "workspace-copy-files",
+          "workspace-setup-script",
+          "workspace-discard-script",
           "delete-workspace-branch-on-discard",
         ]
       : [];
@@ -279,6 +281,8 @@ export function SettingsView({
   const branchNamingProviderRef = useRef<HTMLSelectElement | null>(null);
   const projectWorkspaceBranchPrefixRef = useRef<HTMLInputElement | null>(null);
   const workspaceCopyFilesRef = useRef<HTMLTextAreaElement | null>(null);
+  const workspaceSetupScriptRef = useRef<HTMLTextAreaElement | null>(null);
+  const workspaceDiscardScriptRef = useRef<HTMLTextAreaElement | null>(null);
   const projectSearchIncludesRef = useRef<HTMLTextAreaElement | null>(null);
   const projectSearchExcludesRef = useRef<HTMLTextAreaElement | null>(null);
   const [focusPane, setFocusPane] = useState<FocusPane>("left");
@@ -497,6 +501,22 @@ export function SettingsView({
     });
   };
 
+  const updateProjectWorkspaceSetupScript = (value: string) => {
+    if (!selectedProject || selectedProject.kind !== "git") return;
+    onProjectSettingsChange(selectedProject.id, {
+      ...selectedProject.settings,
+      workspaceSetupScript: value,
+    });
+  };
+
+  const updateProjectWorkspaceDiscardScript = (value: string) => {
+    if (!selectedProject || selectedProject.kind !== "git") return;
+    onProjectSettingsChange(selectedProject.id, {
+      ...selectedProject.settings,
+      workspaceDiscardScript: value,
+    });
+  };
+
   const updateProjectSearchIncludePaths = (value: string) => {
     if (!selectedProject) return;
     onProjectSettingsChange(selectedProject.id, {
@@ -636,6 +656,14 @@ export function SettingsView({
     }
     if (activeControlId === "workspace-copy-files") {
       workspaceCopyFilesRef.current?.focus();
+      return;
+    }
+    if (activeControlId === "workspace-setup-script") {
+      workspaceSetupScriptRef.current?.focus();
+      return;
+    }
+    if (activeControlId === "workspace-discard-script") {
+      workspaceDiscardScriptRef.current?.focus();
       return;
     }
     if (activeControlId === "project-search-includes") {
@@ -1689,6 +1717,8 @@ export function SettingsView({
       <div className="settings-detail-body">
         {renderProjectWorkspaceBranchPrefixControl()}
         {renderWorkspaceCopyFilesControl()}
+        {renderWorkspaceSetupScriptControl()}
+        {renderWorkspaceDiscardScriptControl()}
         {renderToggleRow({
           id: "delete-workspace-branch-on-discard",
           title: "Delete local branch when discarding workspace",
@@ -1791,6 +1821,72 @@ export function SettingsView({
           spellCheck={false}
           onFocus={() => setActiveControlId("workspace-copy-files")}
           onChange={(event) => updateProjectWorkspaceCopyFiles(event.target.value)}
+        />
+      </label>
+    );
+  }
+
+  function renderWorkspaceSetupScriptControl() {
+    if (!selectedProject || selectedProject.kind !== "git") return null;
+    const active = activeControlId === "workspace-setup-script" && focusPane === "right";
+
+    return (
+      <label
+        className={[
+          "settings-row",
+          "settings-textarea-row",
+          active ? "settings-row-active" : "",
+        ].join(" ")}
+        onClick={() => setActiveControlId("workspace-setup-script")}
+      >
+        <span className="settings-row-copy">
+          <span className="settings-row-title">Workspace setup script</span>
+          <span className="settings-row-description">
+            Optional shell script run from each new Workspace root after files are copied.
+          </span>
+        </span>
+        <textarea
+          ref={workspaceSetupScriptRef}
+          className="settings-textarea-control"
+          value={selectedProject.settings.workspaceSetupScript ?? ""}
+          placeholder="pnpm install --frozen-lockfile"
+          rows={4}
+          spellCheck={false}
+          onFocus={() => setActiveControlId("workspace-setup-script")}
+          onChange={(event) => updateProjectWorkspaceSetupScript(event.target.value)}
+        />
+      </label>
+    );
+  }
+
+  function renderWorkspaceDiscardScriptControl() {
+    if (!selectedProject || selectedProject.kind !== "git") return null;
+    const active = activeControlId === "workspace-discard-script" && focusPane === "right";
+
+    return (
+      <label
+        className={[
+          "settings-row",
+          "settings-textarea-row",
+          active ? "settings-row-active" : "",
+        ].join(" ")}
+        onClick={() => setActiveControlId("workspace-discard-script")}
+      >
+        <span className="settings-row-copy">
+          <span className="settings-row-title">Workspace discard script</span>
+          <span className="settings-row-description">
+            Optional shell script run from the Workspace root before Fluidity removes it.
+          </span>
+        </span>
+        <textarea
+          ref={workspaceDiscardScriptRef}
+          className="settings-textarea-control"
+          value={selectedProject.settings.workspaceDiscardScript ?? ""}
+          placeholder="pnpm store prune"
+          rows={4}
+          spellCheck={false}
+          onFocus={() => setActiveControlId("workspace-discard-script")}
+          onChange={(event) => updateProjectWorkspaceDiscardScript(event.target.value)}
         />
       </label>
     );
