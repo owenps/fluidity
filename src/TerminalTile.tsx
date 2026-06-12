@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
 import {
   createTerminalSessionRuntime,
   type TerminalSessionRuntime,
 } from "./terminalSessionRuntime";
+import { CustomScrollbars } from "./ScrollArea";
 import type { TerminalLaunch, TileResumeMetadata } from "./types";
 
 interface TerminalTileProps {
@@ -31,6 +32,8 @@ export function TerminalTile({
 }: TerminalTileProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<TerminalSessionRuntime | null>(null);
+  const [scrollViewport, setScrollViewport] = useState<HTMLElement | null>(null);
+  const scrollViewportRef = useMemo(() => ({ current: scrollViewport }), [scrollViewport]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -48,7 +51,14 @@ export function TerminalTile({
     runtimeRef.current = runtime;
     runtime.setActive(active);
 
+    const syncScrollViewport = () =>
+      setScrollViewport(host.querySelector<HTMLElement>(".xterm-viewport"));
+    syncScrollViewport();
+    const viewportFrame = window.requestAnimationFrame(syncScrollViewport);
+
     return () => {
+      window.cancelAnimationFrame(viewportFrame);
+      setScrollViewport(null);
       runtime.detach(host);
       if (runtimeRef.current === runtime) {
         runtimeRef.current = null;
@@ -80,5 +90,10 @@ export function TerminalTile({
     runtimeRef.current?.setActive(active);
   }, [active, focusToken]);
 
-  return <div ref={hostRef} className="terminal-host" />;
+  return (
+    <div className="terminal-host">
+      <div ref={hostRef} className="terminal-xterm-mount" />
+      {scrollViewport ? <CustomScrollbars viewportRef={scrollViewportRef} /> : null}
+    </div>
+  );
 }

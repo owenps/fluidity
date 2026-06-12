@@ -683,6 +683,7 @@ body {
 }
 
 .terminal-host,
+.terminal-xterm-mount,
 .tile-placeholder,
 .tile-unavailable,
 .workspace-stack-tile,
@@ -694,6 +695,10 @@ body {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+.terminal-host {
+  position: relative;
 }
 
 .tile-placeholder {
@@ -1857,6 +1862,13 @@ body {
 .xterm .xterm-viewport {
   overflow-y: scroll !important;
   background: transparent !important;
+  scrollbar-width: none;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .toggle {
