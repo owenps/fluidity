@@ -1,28 +1,12 @@
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
 import { useEffect, useMemo, useRef } from "react";
+import { useMarkdownCodeBlockHighlighting } from "./markdownCodeBlocks";
 import { markdownTaskListPlugin } from "./markdownTaskLists";
 import { CustomScrollbars } from "./ScrollArea";
 
 const markdown = new MarkdownIt({ html: false, linkify: true, typographer: true });
 markdown.use(markdownTaskListPlugin);
-
-const languageAliases: Record<string, string> = {
-  bash: "shell",
-  cjs: "javascript",
-  js: "javascript",
-  jsx: "javascript",
-  md: "markdown",
-  mjs: "javascript",
-  py: "python",
-  rb: "ruby",
-  rs: "rust",
-  sh: "shell",
-  ts: "typescript",
-  tsx: "typescript",
-  yml: "yaml",
-};
 
 interface NotepadTileProps {
   active: boolean;
@@ -30,12 +14,6 @@ interface NotepadTileProps {
   markdownEnabled: boolean;
   value: string;
   onChange: (value: string) => void;
-}
-
-function normalizeLanguage(language: string) {
-  const normalized = language.trim().toLowerCase();
-  if (!normalized) return "plaintext";
-  return languageAliases[normalized] ?? normalized;
 }
 
 export function NotepadTile({
@@ -54,33 +32,7 @@ export function NotepadTile({
     if (active) textareaRef.current?.focus();
   }, [active, focusToken]);
 
-  useEffect(() => {
-    if (!previewVisible || !previewRef.current) return;
-
-    let canceled = false;
-    const codeBlocks = [...previewRef.current.querySelectorAll("pre code")];
-
-    codeBlocks.forEach((codeBlock) => {
-      const languageClass = [...codeBlock.classList].find((className) =>
-        className.startsWith("language-"),
-      );
-      const language = normalizeLanguage(languageClass?.slice("language-".length) ?? "");
-      const code = codeBlock.textContent ?? "";
-
-      void monaco.editor
-        .colorize(code, language, {})
-        .then((html) => {
-          if (canceled) return;
-          codeBlock.innerHTML = html;
-          codeBlock.classList.add("notepad-code-highlighted");
-        })
-        .catch(() => undefined);
-    });
-
-    return () => {
-      canceled = true;
-    };
-  }, [previewHtml, previewVisible]);
+  useMarkdownCodeBlockHighlighting(previewRef, previewHtml, previewVisible);
 
   return (
     <div className="notepad-tile" data-active={active ? "true" : "false"}>

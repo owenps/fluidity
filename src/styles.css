@@ -777,13 +777,15 @@ body {
   margin-bottom: 0;
 }
 
-.notepad-preview code {
+.notepad-preview code,
+.markdown-preview code {
   border-radius: 4px;
   background: var(--muted);
   padding: 0.1rem 0.25rem;
 }
 
-.notepad-preview pre {
+.notepad-preview pre,
+.markdown-preview pre {
   overflow: auto;
   border-radius: 6px;
   background: var(--muted);
@@ -792,28 +794,34 @@ body {
   scrollbar-width: thin;
 }
 
-.notepad-preview pre::-webkit-scrollbar {
+.notepad-preview pre::-webkit-scrollbar,
+.markdown-preview pre::-webkit-scrollbar {
   width: 14px;
   height: 12px;
 }
 
-.notepad-preview pre::-webkit-scrollbar-track {
+.notepad-preview pre::-webkit-scrollbar-track,
+.markdown-preview pre::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.notepad-preview pre::-webkit-scrollbar-thumb {
+.notepad-preview pre::-webkit-scrollbar-thumb,
+.markdown-preview pre::-webkit-scrollbar-thumb {
   background: var(--fluidity-scrollbar-thumb);
 }
 
-.notepad-preview pre::-webkit-scrollbar-thumb:hover {
+.notepad-preview pre::-webkit-scrollbar-thumb:hover,
+.markdown-preview pre::-webkit-scrollbar-thumb:hover {
   background: var(--fluidity-scrollbar-thumb-hover);
 }
 
-.notepad-preview pre::-webkit-scrollbar-thumb:active {
+.notepad-preview pre::-webkit-scrollbar-thumb:active,
+.markdown-preview pre::-webkit-scrollbar-thumb:active {
   background: var(--fluidity-scrollbar-thumb-active);
 }
 
-.notepad-preview pre code {
+.notepad-preview pre code,
+.markdown-preview pre code {
   background: transparent;
   padding: 0;
 }

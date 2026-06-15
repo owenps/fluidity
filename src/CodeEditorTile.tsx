@@ -28,6 +28,7 @@ import { readCodeFile, statCodeFile, writeCodeFile } from "./codeFileClient";
 import { getCurrentWorkspaceGitPatch } from "./diffClient";
 import type { DiffColorPolarity } from "./settings";
 import { fileIconForPath } from "./fileIcons";
+import { useMarkdownCodeBlockHighlighting } from "./markdownCodeBlocks";
 import { markdownTaskListPlugin } from "./markdownTaskLists";
 import type { ToastSeverity } from "./ToastStack";
 import type { CodeEditorSettings, CodeEditorTileState, CodeEditorViewState } from "./types";
@@ -396,6 +397,7 @@ function sanitizedMarkdownHtml(markdown: string) {
 }
 
 function MarkdownPreview({ markdown }: { markdown: string }) {
+  const previewRef = useRef<HTMLDivElement | null>(null);
   const html = useMemo(() => {
     try {
       return sanitizedMarkdownHtml(markdown);
@@ -403,7 +405,12 @@ function MarkdownPreview({ markdown }: { markdown: string }) {
       return `<pre>Preview failed: ${markdownRenderer.utils.escapeHtml(String(error))}</pre>`;
     }
   }, [markdown]);
-  return <div className="markdown-preview" dangerouslySetInnerHTML={{ __html: html }} />;
+
+  useMarkdownCodeBlockHighlighting(previewRef, html);
+
+  return (
+    <div ref={previewRef} className="markdown-preview" dangerouslySetInnerHTML={{ __html: html }} />
+  );
 }
 
 function HtmlPreview({ html }: { html: string }) {
