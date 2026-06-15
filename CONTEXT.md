@@ -1,6 +1,6 @@
 # Fluidity
 
-Fluidity is a **local-first, extensible workspace kernel** for parallel human + agent software work.
+Fluidity is a **local-first, extensible development studio** for parallel human + agent software work.
 
 It coordinates Projects, Workspaces, Tiles, Commands, Settings, and Extensions so task-specific workflows can be composed without hard-coding one provider, editor, browser, or review loop.
 
@@ -16,7 +16,7 @@ See [Product Thesis](docs/product-thesis.md).
 
 ## Language
 
-**Fluidity**: local-first, extensible desktop workspace kernel. Avoid: IDE, editor, agent app, cloud IDE, GitHub client.
+**Fluidity**: local-first, extensible development studio. Avoid: IDE, editor, agent app, cloud IDE, GitHub client.
 
 **Project**: local root Fluidity registers and manages. Avoid: repository, folder, codebase.
 
@@ -56,7 +56,7 @@ See [Product Thesis](docs/product-thesis.md).
 
 **Project Settings**: Project-scoped overrides/policies.
 
-**Fluidity Core**: app-owned kernel for Projects, Workspaces, Tiles, Commands, Settings, persistence, safety, and Extension loading.
+**Fluidity Core**: app-owned foundation for Projects, Workspaces, Tiles, Commands, Settings, persistence, safety, and Extension loading.
 
 **Core Extension Pack**: bundled first-party Extension package for default user-facing capabilities.
 

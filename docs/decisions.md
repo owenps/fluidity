@@ -4,8 +4,8 @@ Short decision log. Keep this file small. Expand only when a decision actively g
 
 ## Product
 
-- **Fluidity Core is a frugal workspace kernel.** Core owns Projects, Workspaces, Tiles, Commands, Settings, persistence, safety, and Extension loading. Workflow-specific surfaces start as Extensions.
-- **Stable proves the kernel loop.** Register Project → create isolated Workspace/worktree → run Terminal/Tool Tiles → add custom tool via Extension Definition → switch/discard safely.
+- **Fluidity Core is a frugal studio foundation.** Core owns Projects, Workspaces, Tiles, Commands, Settings, persistence, safety, and Extension loading. Workflow-specific surfaces start as Extensions.
+- **Stable proves the core studio loop.** Register Project → create isolated Workspace/worktree → run Terminal/Tool Tiles → add custom tool via Extension Definition → switch/discard safely.
 - **Editor/browser are deferred utility surfaces.** Do not build serious replacements for VS Code, browsers, GitHub, or agent apps.
 
 ## Workspace model

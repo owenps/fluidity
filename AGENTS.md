@@ -1,6 +1,6 @@
 # Fluidity
 
-Fluidity is a local-first, extensible workspace kernel for parallel human + agent software work.
+Fluidity is a local-first, extensible development studio for parallel human + agent software work.
 
 ## Core concepts
 

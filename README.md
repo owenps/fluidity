@@ -5,7 +5,7 @@
   <a href="https://github.com/owenps/fluidity/tags"><img src="https://img.shields.io/github/v/tag/owenps/fluidity?label=release&sort=semver" alt="Latest release tag" /></a>
 </p>
 
-A local-first, extensible workspace kernel for parallel human + agent software work.
+A local-first, extensible development studio for parallel human + agent software work.
 
 `fluidity` exists to make isolated workspaces, terminals, agents, and task-specific tools composable without hard-coding one workflow or provider.
 

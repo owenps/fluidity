@@ -2,7 +2,7 @@
 
 ## Thesis
 
-Fluidity is a **local-first, extensible workspace kernel** for parallel human + agent software work.
+Fluidity is a **local-first, extensible development studio** for parallel human + agent software work.
 
 It is not trying to be the best IDE, browser, GitHub client, terminal app, or agent product. It should make those tools easier to compose around one durable Project/Workspace lifecycle.
 
@@ -39,7 +39,7 @@ Fluidity should compete on **openness and composability**, not on matching polis
 
 The wedge:
 
-> Bring your own agent harness, tool, review loop, and workflow shape into a worktree-native desktop cockpit.
+> Bring your own agent harness, tool, review loop, and workflow shape into a worktree-native development studio.
 
 This is the gap left by opinionated products that have excellent worktree management but limited provider/tool extensibility.
 
@@ -54,7 +54,7 @@ This is the gap left by opinionated products that have excellent worktree manage
 7. **Do not build hard-coded AI provider logic beyond proving the Integration model.**
 8. **Every new Core feature must explain why an Extension cannot own it.**
 9. **Stable means data-safe and dogfoodable, not feature-complete.**
-10. **Delete, defer, or demote surfaces that do not strengthen the workspace kernel.**
+10. **Delete, defer, or demote surfaces that do not strengthen the core studio loop.**
 
 ## Current strategic bet
 
