@@ -1,24 +1,27 @@
 # Fluidity
 
-Fluidity is a singular software development application for managing the full workflow in one place: coding, terminals, git diffs, browser-based work, workspaces, issues, PR review, and agent-assisted development.
+Fluidity is a local-first, extensible workspace kernel for parallel human + agent software work.
 
-## Core Concepts
+## Core concepts
 
-- **Projects**: root directories, usually repositories, that Fluidity can open and manage.
-- **Workspaces**: project-scoped working environments, usually backed by isolated git worktrees when version-controlled.
-- **Tiles**: movable, resizable UI objects with one focused purpose, such as code editor, terminal, git diff, browser, or workspace viewer.
-- **Arrangements**: reusable project templates defining the default tile layout and optional startup actions for new workspaces.
+- **Project**: local root Fluidity registers.
+- **Workspace**: project-scoped work stream, usually an isolated git worktree.
+- **Tile**: focused work surface inside a Workspace.
+- **Tool Tile**: terminal-rendered external tool/agent surface.
+- **Extension**: declared contribution loaded through Fluidity's extension registry.
 
-## Product Direction
+## Product direction
 
-Fluidity should reduce context switching and mental fatigue by making one application the home for the software development lifecycle.
+Fluidity should compete on openness + composition, not all-in-one feature breadth.
 
-Design priorities:
+Priorities:
 
+- Fast Workspace/worktree create, switch, discard.
+- Bring-your-own agent/tool harness via Extensions.
 - Keyboard-first navigation.
-- Fast switching between active workspaces.
-- Isolated agent work by default via git worktrees.
-- Frugal, durable abstractions over feature-specific complexity.
-- Project-specific defaults with room for global reusable tile configuration.
+- Durable persistence, no hidden data loss.
+- Small Core: lifecycle, safety, persistence, composition, extension loading.
 
-Keep this file concise. Move detailed research, decisions, and specifications into `docs/` as needed.
+Frugal rule: if a feature can be an Extension, frame it as an Extension first.
+
+Avoid: IDE, editor, GitHub client, browser app, agent app.

@@ -1,44 +1,97 @@
 # Extensibility
 
-Fluidity's extensibility direction is to make the application a customizable platform for agent-orchestrated development workflows while keeping Fluidity Core small and durable.
+Extensibility is Fluidity's main wedge: bring your own agent harness, CLI, review loop, or project tool into a durable Workspace.
 
-## Confirmed direction
+Core stays small. Extensions contribute workflow-specific capability through declared Extension Points.
 
-- Fluidity distinguishes **Fluidity Core** from the always-present **Core Extension Pack**.
-- Fluidity Core owns durable platform primitives; the Core Extension Pack should contribute first-party user-facing Tiles and workflows wherever practical.
-- The Core Extension Pack uses the stable Extension identity `fluidity.core`.
-- **Extensions** contribute capabilities through supported **Extension Points**.
-- **Integrations** remain the product term for external tool/platform connections; an Integration may be built into Fluidity Core or contributed by an Extension.
-- The first Extension Point is **Integration Tile Contribution**.
-- v1 Extension Definitions contribute one or more Integrations through `contributes.integrations[]`; Integration Tiles are nested under their Integration.
-- Prefer one Extension per external tool/platform unless the contributed capabilities are tightly related.
-- v1 Integration Tile Contributions are command-backed Tool Tiles rendered through the Terminal Session Runtime.
-- v1 Extension Definitions support built-in icon keys for first-party contributions and relative SVG/PNG icon paths for Global Extensions and Project Extensions, with a text fallback when icon loading fails.
-- v1 Tool Tile commands are argv arrays with no implicit shell interpolation or argument-level environment variable expansion.
-- Tool Tile processes inherit the normal process environment; tools that need environment variables should read them directly or explicitly invoke a shell.
-- v1 Tool Tile resume behavior uses explicit strategies, starting with `none` and `session-id-arg` rather than arbitrary launch templates.
-- Persisted Integration Tiles resolve by `extensionId + integrationId + integrationTileId`, not by Integration identity alone.
-- v1 Extensions use an **Extension Definition** stored in `fluidity.extension.json` with a `schemaVersion` field; the v1 schema is documented in [Extension Definitions](extension-definitions.md).
-- `fluidity.extension.json` is a forward-compatible declaration layer, not a permanent rejection of executable Extension modules; the future executable path is researched in [Executable Extension Modules Research](executable-extension-modules.md).
-- Future **Active Extension Points** such as contributed Command handlers, schedules, Workspace lifecycle contributions, Workspace Composition actions, file actions, and alternate input providers should keep `fluidity.extension.json` as their declaration and permission surface; see [Active Extension Points](active-extension-points.md).
-- Fluidity should support both **Global Extensions** and **Project Extensions**.
-- Global Extensions live under Fluidity's app data directory at `extensions/<extension-id>/fluidity.extension.json` and are available across all Projects and Workspaces in this Fluidity app installation.
-- Project Extensions live under `.fluidity/extensions/<extension-id>/fluidity.extension.json` in the Project root and are available only for that Project's Workspaces.
-- Project Extension contributions should be scoped to relevant Open Workspaces/Current Workspace rather than globally loaded from every Registered Project.
-- **Extension Reload** changes available contributions, not existing Workspace Tile State.
-- If an existing Integration Tile no longer resolves after reload, Fluidity keeps the Tile and shows a simple unavailable/broken message so the user or an agent can fix the Extension Definition.
-- Running terminal sessions are not killed by Extension Reload; reload affects future launches/resumes.
-- Extension Reload is a manual user action. Fluidity does not watch extension files or auto-reload them by default.
-- Discovery, Project Extension scoping, and manual reload behavior are specified in [Extension Discovery and Reload](extension-discovery-and-reload.md).
-- The first Fluidity Skill should focus on Extension authoring and be named `fluidity-extensions`; its requirements and draft outline are documented in [`fluidity-extensions` Skill Requirements](fluidity-extensions-skill.md).
-- Fluidity should prompt users to install the Skill when they take Extension-related actions, showing the command `npx skills add owenps/fluidity-extensions` rather than running it automatically.
+## v1 scope
 
-## Executable Extension module direction
+v1 Extensions are **manifest-only** packages. They do not execute extension code.
 
-Executable Extension modules remain future work. Fluidity should not directly copy Pi's arbitrary in-process TypeScript extension model; executable modules should keep `fluidity.extension.json` as the required declaration and permission surface, run outside Fluidity Core through a supervised host, and contribute through the same Workspace-scoped registry as manifest-only Extensions.
+A v1 `fluidity.extension.json` can contribute command-backed Integration Tiles rendered as Tool Tiles through the Terminal Session Runtime.
 
-Active Extension Points are also future work. Manifest-only Extension Definitions remain appropriate when Fluidity Core can fully validate and execute a contribution from data. Executable modules are required when Extensions provide custom runtime behavior, background automation, alternate input handling, or Workspace Composition logic.
+Schema source of truth: [`schemas/fluidity-extension.v1.schema.json`](schemas/fluidity-extension.v1.schema.json).  
+Copyable examples: [`examples/extensions/`](examples/extensions/).
 
-## v1 research target
+## Extension sources
 
-Prove that a user or agent can add a custom agent/tool Tile without changing Fluidity source code, restart-free if practical, using only an Extension Definition.
+- **Core Extension Pack**: bundled first-party Extension, identity `fluidity.core`.
+- **Global Extensions**: app-wide, under app data: `extensions/<extension-id>/fluidity.extension.json`.
+- **Project Extensions**: Project-scoped, under Project root: `.fluidity/extensions/<extension-id>/fluidity.extension.json`.
+
+The directory name must match the Extension Definition `id`.
+
+## v1 manifest shape
+
+Required:
+
+- `schemaVersion: 1`
+- `id`
+- `title`
+- `contributes.integrations[]`
+- `contributes.integrations[].tiles[]`
+
+Integration Tile ids are stable within their Integration. Persisted Tiles resolve by:
+
+```text
+extensionId + integrationId + integrationTileId
+```
+
+## Command rules
+
+`command.argv` is exact argv entries.
+
+Fluidity does not:
+
+- split strings;
+- perform implicit shell interpolation;
+- expand env vars inside argv entries.
+
+Tool processes inherit the normal resolved process environment. If shell behavior is needed, explicitly invoke a shell.
+
+```json
+{ "argv": ["pnpm", "dev"] }
+```
+
+```json
+{ "argv": ["sh", "-lc", "my-tool \"$MY_ENV\""] }
+```
+
+## Resume strategies
+
+- `none`: launch argv exactly; no Fluidity resume metadata.
+- `session-id-arg`: Fluidity appends the configured arg and a stable session id, e.g. `--session-id <id>`.
+
+## Icons
+
+Supported:
+
+- first-party icon key: `{ "key": "pi" }`
+- relative SVG/PNG path from manifest directory: `{ "path": "icons/tool.svg" }`
+
+Unsupported in v1: absolute paths, URLs, parent-directory traversal.
+
+## Reload semantics
+
+Extension Reload is manual.
+
+Reload:
+
+- re-reads manifests;
+- updates future Tile picker entries and launches;
+- preserves existing Workspace Tile State;
+- does not kill running terminal sessions.
+
+If a persisted Integration Tile no longer resolves, keep the Tile and show unavailable diagnostics.
+
+## Future executable Extensions
+
+Executable Extension Modules are future work.
+
+Rules already decided:
+
+- manifest remains required for identity, permissions, provenance, and activation declarations;
+- project executable code is disabled until explicitly trusted;
+- runtime modules run outside Fluidity Core;
+- runtime contributions register through the same Workspace-scoped registry;
+- permissions are deny-by-default where enforceable, otherwise presented honestly as full code trust.

@@ -4,9 +4,16 @@ Issue: [#26 Production readiness](https://github.com/owenps/fluidity/issues/26)
 
 ## Release promise
 
-The first stable release is a macOS, local-first development workspace focused on reliable Project, Workspace, Terminal Tile, Tool Tile, Extension, and Settings flows.
+The first stable release is a macOS, local-first, extensible workspace kernel focused on reliable Project, Workspace, Terminal Tile, Tool Tile, Extension, and Settings flows.
 
-Stable means these scoped flows are documented, data-safe, and smoke-tested. It does not mean every product-direction surface in `CONTEXT.md` is implemented.
+Stable means these scoped flows are documented, data-safe, and smoke-tested. It does not mean every product-direction surface in `CONTEXT.md` is implemented. The release should prove the [Product Thesis](product-thesis.md): isolated workspaces plus bring-your-own tools are valuable before Fluidity adds richer workflow surfaces.
+
+## Frugal scope contract
+
+- Core owns lifecycle, persistence, safety, composition, settings, and extension loading.
+- Workflow-specific capabilities should start as Integration Tile Contributions or future Extensions.
+- Code editor, browser, GitHub, PR review, issue, AI-provider, and theme surfaces are not needed to prove stable.
+- Any stable-scope addition must explain why it cannot be deferred to the Core Extension Pack or an Extension.
 
 ## In scope
 

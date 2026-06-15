@@ -5,9 +5,9 @@
   <a href="https://github.com/owenps/fluidity/tags"><img src="https://img.shields.io/github/v/tag/owenps/fluidity?label=release&sort=semver" alt="Latest release tag" /></a>
 </p>
 
-A desktop workspace for coordinating multiple AI coding agents, built to stay flexible around how you work.
+A local-first, extensible workspace kernel for parallel human + agent software work.
 
-`fluidity` comes from the simple desire to reduce context switching across multiple applications and keep work flowing across every change.
+`fluidity` exists to make isolated workspaces, terminals, agents, and task-specific tools composable without hard-coding one workflow or provider.
 
 Currently available only for <a href="https://www.apple.com/macos/"><kbd><img src="https://cdn.simpleicons.org/apple/white" width="16" valign="middle" /> macOS</kbd></a>.&nbsp;
 
@@ -22,11 +22,13 @@ Currently available only for <a href="https://www.apple.com/macos/"><kbd><img sr
 
 ## Core Features
 
-* **Native Git Worktree Support 𖣂** — Every feature, bugfix, or experiment gets its own isolated worktree. No stashing, no branch juggling. Spin up and switch instantly.
-* **Flexible Tile Workspaces ⊞** — Build your workspace out of tiles: code editors, terminals, git diffs, browsers, issue views, PR reviews, and agent sessions. Arrange them however the task demands.
-* **Keyboard-First Navigation ⚡︎** — Move fast without reaching for the mouse. Vim-friendly navigation, quick switching, and command-driven workflows throughout.
-* **Integrated Git Review ⎇** — Review diffs, inspect changes, compare branches, and manage work-in-progress without leaving the app.
-* **Reusable Arrangements ⟡** — Define project-specific workspace templates so common workflows open with the right tiles, layout, and startup actions already in place.
+* **Native Git Worktree Support 𖣂** — Every stream of work gets an isolated Workspace/worktree.
+* **Composable Tile Workspaces ⊞** — Terminals, Tool Tiles, and future Integration Tiles share one persistent Workspace Grid.
+* **Bring-Your-Own Tools ⟡** — Add custom agent/tool Tiles through Extension Definitions instead of changing Fluidity source.
+* **Keyboard-First Navigation ⚡︎** — Fast Workspace switching, tile focus, and command-driven workflows.
+* **Frugal Core** — Fluidity Core owns lifecycle, persistence, safety, and extension loading; workflow-specific surfaces belong in Extensions.
+
+See [Product Thesis](docs/product-thesis.md) for the current direction.
 
 ## Showcase
 

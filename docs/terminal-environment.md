@@ -19,5 +19,5 @@ This keeps packaged Fluidity builds able to find common developer tools such as 
 ## Known seams
 
 - Only `SHELL` and `PATH` are normalized today. Other environment variables are inherited from the packaged app process unless the launched shell config sets them.
-- Tool Tiles run declared argv through the user's shell for launch/resume behavior; Extension Definitions should still avoid relying on implicit shell interpolation in argv declarations.
+- Tool Tiles use the resolved shell/environment for terminal behavior, but Extension `command.argv` remains exact argv data: no implicit splitting, interpolation, or env expansion.
 - A future Settings or Project Settings field may expose explicit shell/PATH overrides if users need nonstandard bootstrap behavior.
