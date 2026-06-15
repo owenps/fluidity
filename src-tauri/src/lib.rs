@@ -2,6 +2,7 @@ mod developer_environment;
 mod extension_catalog;
 mod terminal_session_runtime;
 mod tile_definition;
+mod workspace_lifecycle;
 
 use developer_environment::resolve_for_cwd;
 #[cfg(test)]
@@ -1191,13 +1192,9 @@ fn project_add(state: State<'_, WorkspaceState>) -> Result<ProjectAddResponse, S
         (project, false)
     };
 
-    let mut warnings = Vec::new();
-    let workspace_id =
-        select_or_create_initial_workspace(&app_data_dir, &mut app_state, &project, &mut warnings)?;
-    set_current_workspace(&mut app_state, &workspace_id);
-    normalize_workspace_stack(&mut app_state);
+    let (overview, warnings) =
+        workspace_lifecycle::open_project(&app_data_dir, &mut app_state, &project)?;
     state.save(&app_state)?;
-    let overview = workspace_overview_for_state(&app_state);
 
     Ok(ProjectAddResponse {
         current: overview.current.clone(),
@@ -1219,39 +1216,13 @@ async fn workspace_create(
 
     tauri::async_runtime::spawn_blocking(move || {
         let mut app_state = app_state.lock().map_err(lock_error)?;
-        let project = app_state
-            .projects
-            .iter()
-            .find(|project| project.id == request.project_id)
-            .cloned()
-            .ok_or_else(|| "project not found".to_string())?;
-
-        if project.kind != ProjectKind::Git {
-            return Err("new workspaces are only available for git-backed projects".to_string());
-        }
-        if !Path::new(&project.root).is_dir() {
-            return Err("project root is missing".to_string());
-        }
-
-        let mut warnings = Vec::new();
-        let workspace =
-            create_git_workspace(&app_data_dir, &mut app_state, &project, &mut warnings)?;
-        let workspace_id = workspace.id.clone();
-        app_state.open_workspaces.push(workspace);
-        set_current_workspace(&mut app_state, &workspace_id);
-        normalize_workspace_stack(&mut app_state);
+        let response = workspace_lifecycle::create_workspace(
+            &app_data_dir,
+            &mut app_state,
+            &request.project_id,
+        )?;
         save_app_state(&state_path, &app_state)?;
-
-        let overview = workspace_overview_for_state(&app_state);
-        let current = overview
-            .current
-            .clone()
-            .ok_or_else(|| "created workspace is unavailable".to_string())?;
-        Ok(WorkspaceCreateResponse {
-            current,
-            overview,
-            warnings,
-        })
+        Ok(response)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1263,16 +1234,9 @@ fn workspace_rename(
     request: WorkspaceRenameRequest,
 ) -> Result<WorkspaceRenameResponse, String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
-    let warnings = rename_workspace(&mut app_state, &request.workspace_id, &request.name)?;
-    refresh_workspace_branch_observations(&mut app_state);
-    normalize_workspace_stack(&mut app_state);
+    let response = workspace_lifecycle::rename_open_workspace(&mut app_state, request)?;
     state.save(&app_state)?;
-    let overview = workspace_overview_for_state(&app_state);
-    Ok(WorkspaceRenameResponse {
-        current: overview.current.clone(),
-        overview,
-        warnings,
-    })
+    Ok(response)
 }
 
 #[tauri::command]
@@ -1281,16 +1245,9 @@ fn workspace_capture_first_intent(
     request: WorkspaceIntentCaptureRequest,
 ) -> Result<WorkspaceIntentCaptureResponse, String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
-    let warnings = capture_workspace_first_intent(&mut app_state, request)?;
-    refresh_workspace_branch_observations(&mut app_state);
-    normalize_workspace_stack(&mut app_state);
+    let response = workspace_lifecycle::capture_first_intent(&mut app_state, request)?;
     state.save(&app_state)?;
-    let overview = workspace_overview_for_state(&app_state);
-    Ok(WorkspaceIntentCaptureResponse {
-        current: overview.current.clone(),
-        overview,
-        warnings,
-    })
+    Ok(response)
 }
 
 #[tauri::command]
@@ -1300,14 +1257,14 @@ fn project_remove(
     request: ProjectRemoveRequest,
 ) -> Result<ProjectRemoveResponse, String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
-    match workspace_removal::project_disconnect(
+    match workspace_lifecycle::project_disconnect(
         &mut app_state,
         &state.app_data_dir,
         &terminal_state,
         &request.project_id,
         request.confirm_dirty,
     )? {
-        workspace_removal::ProjectDisconnectResult::Dirty {
+        workspace_lifecycle::ProjectDisconnectResult::Dirty {
             project,
             dirty_confirmation,
         } => {
@@ -1321,7 +1278,7 @@ fn project_remove(
                 warnings: Vec::new(),
             })
         }
-        workspace_removal::ProjectDisconnectResult::Disconnected {
+        workspace_lifecycle::ProjectDisconnectResult::Disconnected {
             project,
             removed_workspace_count,
             warnings,
@@ -1353,21 +1310,21 @@ async fn workspace_discard(
 
     tauri::async_runtime::spawn_blocking(move || {
         let mut app_state = app_state.lock().map_err(lock_error)?;
-        match workspace_removal::workspace_discard(
+        match workspace_lifecycle::workspace_discard(
             &mut app_state,
             &app_data_dir,
             &terminal_state,
             &request.workspace_id,
             request.confirm_dirty,
         )? {
-            workspace_removal::WorkspaceDiscardResult::Dirty { dirty_confirmation } => {
+            workspace_lifecycle::WorkspaceDiscardResult::Dirty { dirty_confirmation } => {
                 Ok(WorkspaceDiscardResponse {
                     overview: workspace_overview_for_state(&app_state),
                     dirty_confirmation: Some(dirty_confirmation),
                     warnings: Vec::new(),
                 })
             }
-            workspace_removal::WorkspaceDiscardResult::Discarded { warnings } => {
+            workspace_lifecycle::WorkspaceDiscardResult::Discarded { warnings } => {
                 save_app_state(&state_path, &app_state)?;
                 Ok(WorkspaceDiscardResponse {
                     overview: workspace_overview_for_state(&app_state),
@@ -1387,23 +1344,9 @@ fn workspace_switch(
     request: WorkspaceSwitchRequest,
 ) -> Result<WorkspaceSwitchResponse, String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
-    let Some(workspace) = app_state
-        .open_workspaces
-        .iter()
-        .find(|workspace| workspace.id == request.workspace_id)
-    else {
-        return Err("workspace not found".to_string());
-    };
-    if !workspace_root_available(workspace) {
-        return Err("workspace root is missing".to_string());
-    }
-
-    set_current_workspace(&mut app_state, &request.workspace_id);
-    normalize_workspace_stack(&mut app_state);
+    let response = workspace_lifecycle::switch_workspace(&mut app_state, &request.workspace_id)?;
     state.save(&app_state)?;
-    Ok(WorkspaceSwitchResponse {
-        overview: workspace_overview_for_state(&app_state),
-    })
+    Ok(response)
 }
 
 #[tauri::command]
@@ -1412,15 +1355,7 @@ fn workspace_tile_state_save(
     request: WorkspaceTileStateSaveRequest,
 ) -> Result<(), String> {
     let mut app_state = state.app_state.lock().map_err(lock_error)?;
-    let Some(workspace) = app_state
-        .open_workspaces
-        .iter_mut()
-        .find(|workspace| workspace.id == request.workspace_id)
-    else {
-        return Err("workspace not found".to_string());
-    };
-
-    workspace.tile_state = sanitize_tile_state(request.tile_state);
+    workspace_lifecycle::save_tile_state(&mut app_state, request)?;
     state.save(&app_state)
 }
 
@@ -1575,20 +1510,20 @@ fn application_reset(
     request: ApplicationResetRequest,
 ) -> Result<ApplicationResetResponse, String> {
     let mut app_state = workspace_state.app_state.lock().map_err(lock_error)?;
-    match workspace_removal::application_reset(
+    match workspace_lifecycle::application_reset(
         &mut app_state,
         &workspace_state.app_data_dir,
         &terminal_state,
         request.confirm_dirty,
     )? {
-        workspace_removal::ApplicationResetResult::Dirty { dirty_confirmation } => {
+        workspace_lifecycle::ApplicationResetResult::Dirty { dirty_confirmation } => {
             Ok(ApplicationResetResponse {
                 overview: workspace_overview_for_state(&app_state),
                 dirty_confirmation: Some(dirty_confirmation),
                 warnings: Vec::new(),
             })
         }
-        workspace_removal::ApplicationResetResult::Reset { warnings } => {
+        workspace_lifecycle::ApplicationResetResult::Reset { warnings } => {
             workspace_state.save(&app_state)?;
             Ok(ApplicationResetResponse {
                 overview: workspace_overview_for_state(&app_state),
@@ -2222,7 +2157,7 @@ fn run_workspace_setup_script(
 }
 
 fn run_workspace_discard_script(
-    target: &workspace_removal::WorkspaceCleanupTarget,
+    target: &workspace_lifecycle::WorkspaceCleanupTarget,
     warnings: &mut Vec<String>,
 ) {
     if let Err(error) = run_workspace_lifecycle_script(
@@ -3088,489 +3023,6 @@ fn current_workspace_id_is_available(app_state: &PersistedAppState) -> bool {
 
 fn set_current_workspace(app_state: &mut PersistedAppState, workspace_id: &str) {
     app_state.current_workspace_id = Some(workspace_id.to_string());
-}
-
-mod workspace_removal {
-    use super::*;
-
-    #[derive(Debug, Clone)]
-    pub(super) struct WorkspaceCleanupTarget {
-        pub(super) workspace: OpenWorkspace,
-        pub(super) project: RegisteredProject,
-    }
-
-    pub(super) enum ProjectDisconnectResult {
-        Dirty {
-            project: RegisteredProject,
-            dirty_confirmation: DirtyConfirmation,
-        },
-        Disconnected {
-            project: RegisteredProject,
-            removed_workspace_count: usize,
-            warnings: Vec<String>,
-        },
-    }
-
-    pub(super) enum WorkspaceDiscardResult {
-        Dirty {
-            dirty_confirmation: DirtyConfirmation,
-        },
-        Discarded {
-            warnings: Vec<String>,
-        },
-    }
-
-    pub(super) enum ApplicationResetResult {
-        Dirty {
-            dirty_confirmation: DirtyConfirmation,
-        },
-        Reset {
-            warnings: Vec<String>,
-        },
-    }
-
-    pub(super) fn project_disconnect(
-        app_state: &mut PersistedAppState,
-        app_data_dir: &Path,
-        terminal_state: &TerminalState,
-        project_id: &str,
-        confirm_dirty: bool,
-    ) -> Result<ProjectDisconnectResult, String> {
-        let (project_index, project, workspace_ids, workspaces) =
-            select_project_disconnect_targets(app_state, project_id)?;
-        let cleanup_workspaces = cleanup_targets_for_managed_workspaces(app_data_dir, &workspaces);
-
-        if let Some(dirty_confirmation) =
-            confirm_dirty_then_close_runtime(&cleanup_workspaces, confirm_dirty, || {
-                close_terminal_workspaces(terminal_state, &workspaces)
-            })?
-        {
-            return Ok(ProjectDisconnectResult::Dirty {
-                project,
-                dirty_confirmation,
-            });
-        }
-
-        let mut warnings = Vec::new();
-        remove_workspace_roots(
-            app_data_dir,
-            &cleanup_workspaces,
-            confirm_dirty,
-            &mut warnings,
-        )?;
-
-        let project = app_state.projects.remove(project_index);
-        let removed_workspace_count = remove_workspaces_from_state(app_state, &workspace_ids);
-        normalize_workspace_stack(app_state);
-
-        Ok(ProjectDisconnectResult::Disconnected {
-            project,
-            removed_workspace_count,
-            warnings,
-        })
-    }
-
-    pub(super) fn workspace_discard(
-        app_state: &mut PersistedAppState,
-        app_data_dir: &Path,
-        terminal_state: &TerminalState,
-        workspace_id: &str,
-        confirm_dirty: bool,
-    ) -> Result<WorkspaceDiscardResult, String> {
-        let target = workspace_discard_target(app_state, workspace_id)?;
-        if !workspace_discardable(app_data_dir, &target.project, &target.workspace) {
-            return Err("workspace is not discardable".to_string());
-        }
-        let cleanup_workspaces = vec![target.clone()];
-
-        if let Some(dirty_confirmation) =
-            confirm_dirty_then_close_runtime(&cleanup_workspaces, confirm_dirty, || {
-                close_terminal_workspaces(terminal_state, &cleanup_workspaces)
-            })?
-        {
-            return Ok(WorkspaceDiscardResult::Dirty { dirty_confirmation });
-        }
-
-        let mut warnings = Vec::new();
-        remove_workspace_roots(
-            app_data_dir,
-            &cleanup_workspaces,
-            confirm_dirty,
-            &mut warnings,
-        )?;
-        delete_workspace_branch_after_discard(&target, &mut warnings);
-        let next_current_workspace_id =
-            if app_state.current_workspace_id.as_deref() == Some(workspace_id) {
-                next_workspace_id_after_single_removal(app_state, workspace_id)
-            } else {
-                app_state.current_workspace_id.clone()
-            };
-        remove_workspaces_from_state(app_state, &[workspace_id.to_string()]);
-        app_state.current_workspace_id = next_current_workspace_id;
-        normalize_workspace_stack(app_state);
-
-        Ok(WorkspaceDiscardResult::Discarded { warnings })
-    }
-
-    pub(super) fn application_reset(
-        app_state: &mut PersistedAppState,
-        app_data_dir: &Path,
-        terminal_state: &TerminalState,
-        confirm_dirty: bool,
-    ) -> Result<ApplicationResetResult, String> {
-        let workspaces = all_workspace_targets(app_state);
-        let cleanup_workspaces = cleanup_targets_for_managed_workspaces(app_data_dir, &workspaces);
-
-        if let Some(dirty_confirmation) =
-            confirm_dirty_then_close_runtime(&cleanup_workspaces, confirm_dirty, || {
-                terminal_state.close_all()
-            })?
-        {
-            return Ok(ApplicationResetResult::Dirty { dirty_confirmation });
-        }
-
-        let mut warnings = Vec::new();
-        remove_workspace_roots(
-            app_data_dir,
-            &cleanup_workspaces,
-            confirm_dirty,
-            &mut warnings,
-        )?;
-        *app_state = PersistedAppState::default();
-
-        Ok(ApplicationResetResult::Reset { warnings })
-    }
-
-    fn select_project_disconnect_targets(
-        app_state: &PersistedAppState,
-        project_id: &str,
-    ) -> Result<
-        (
-            usize,
-            RegisteredProject,
-            Vec<String>,
-            Vec<WorkspaceCleanupTarget>,
-        ),
-        String,
-    > {
-        let project_index = app_state
-            .projects
-            .iter()
-            .position(|project| project.id == project_id)
-            .ok_or_else(|| "project not found".to_string())?;
-        let project = app_state.projects[project_index].clone();
-        let mut workspace_ids = Vec::new();
-        let mut workspaces = Vec::new();
-
-        for workspace in app_state
-            .open_workspaces
-            .iter()
-            .filter(|workspace| workspace.project_id == project.id)
-        {
-            workspace_ids.push(workspace.id.clone());
-            workspaces.push(WorkspaceCleanupTarget {
-                workspace: workspace.clone(),
-                project: project.clone(),
-            });
-        }
-
-        Ok((project_index, project, workspace_ids, workspaces))
-    }
-
-    fn all_workspace_targets(app_state: &PersistedAppState) -> Vec<WorkspaceCleanupTarget> {
-        app_state
-            .open_workspaces
-            .iter()
-            .filter_map(|workspace| {
-                app_state
-                    .projects
-                    .iter()
-                    .find(|project| project.id == workspace.project_id)
-                    .map(|project| WorkspaceCleanupTarget {
-                        workspace: workspace.clone(),
-                        project: project.clone(),
-                    })
-            })
-            .collect()
-    }
-
-    fn workspace_discard_target(
-        app_state: &PersistedAppState,
-        workspace_id: &str,
-    ) -> Result<WorkspaceCleanupTarget, String> {
-        let mut target = workspace_cleanup_target(app_state, workspace_id)?;
-        target.workspace.git_branch =
-            observed_git_branch(target.project.kind, &target.workspace.root)
-                .or(target.workspace.git_branch.clone());
-        Ok(target)
-    }
-
-    fn workspace_cleanup_target(
-        app_state: &PersistedAppState,
-        workspace_id: &str,
-    ) -> Result<WorkspaceCleanupTarget, String> {
-        let workspace = app_state
-            .open_workspaces
-            .iter()
-            .find(|workspace| workspace.id == workspace_id)
-            .cloned()
-            .ok_or_else(|| "workspace not found".to_string())?;
-        let project = app_state
-            .projects
-            .iter()
-            .find(|project| project.id == workspace.project_id)
-            .cloned()
-            .ok_or_else(|| "workspace project not found".to_string())?;
-        Ok(WorkspaceCleanupTarget { workspace, project })
-    }
-
-    fn cleanup_targets_for_managed_workspaces(
-        app_data_dir: &Path,
-        targets: &[WorkspaceCleanupTarget],
-    ) -> Vec<WorkspaceCleanupTarget> {
-        targets
-            .iter()
-            .filter(|target| {
-                workspace_discardable(app_data_dir, &target.project, &target.workspace)
-            })
-            .cloned()
-            .collect()
-    }
-
-    fn confirm_dirty_then_close_runtime<F>(
-        targets: &[WorkspaceCleanupTarget],
-        confirm_dirty: bool,
-        close_runtime: F,
-    ) -> Result<Option<DirtyConfirmation>, String>
-    where
-        F: FnOnce() -> Result<(), String>,
-    {
-        if let Some(dirty_confirmation) = dirty_blocker(targets, confirm_dirty)? {
-            return Ok(Some(dirty_confirmation));
-        }
-
-        close_runtime()?;
-
-        dirty_blocker(targets, confirm_dirty)
-    }
-
-    fn dirty_blocker(
-        targets: &[WorkspaceCleanupTarget],
-        confirm_dirty: bool,
-    ) -> Result<Option<DirtyConfirmation>, String> {
-        let dirty_confirmation = dirty_confirmation_for_workspaces(targets)?;
-        if confirm_dirty {
-            Ok(None)
-        } else {
-            Ok(dirty_confirmation)
-        }
-    }
-
-    fn close_terminal_workspaces(
-        terminal_state: &TerminalState,
-        targets: &[WorkspaceCleanupTarget],
-    ) -> Result<(), String> {
-        let workspaces = targets
-            .iter()
-            .map(|target| {
-                (
-                    target.workspace.id.clone(),
-                    PathBuf::from(&target.workspace.root),
-                )
-            })
-            .collect::<Vec<_>>();
-        terminal_state.close_workspaces(&workspaces)
-    }
-
-    fn dirty_confirmation_for_workspaces(
-        targets: &[WorkspaceCleanupTarget],
-    ) -> Result<Option<DirtyConfirmation>, String> {
-        let summaries = targets
-            .iter()
-            .filter_map(
-                |target| match dirty_workspace_summary(&target.workspace.root) {
-                    Ok(Some(summary)) => Some(Ok(summary)),
-                    Ok(None) => None,
-                    Err(error) => Some(Err(error)),
-                },
-            )
-            .collect::<Result<Vec<_>, _>>()?;
-
-        if summaries.is_empty() {
-            return Ok(None);
-        }
-
-        let changed_file_count = summaries
-            .iter()
-            .map(|summary| summary.changed_file_count)
-            .sum();
-        let sample_paths = summaries
-            .iter()
-            .flat_map(|summary| summary.sample_paths.clone())
-            .take(10)
-            .collect::<Vec<_>>();
-
-        Ok(Some(DirtyConfirmation {
-            dirty_workspace_count: summaries.len(),
-            changed_file_count,
-            sample_paths,
-            message: "Uncommitted Workspace changes will be deleted.".to_string(),
-        }))
-    }
-
-    fn remove_workspace_roots(
-        app_data_dir: &Path,
-        targets: &[WorkspaceCleanupTarget],
-        force: bool,
-        warnings: &mut Vec<String>,
-    ) -> Result<(), String> {
-        for target in targets {
-            remove_workspace_root(app_data_dir, target, force, warnings)?;
-        }
-        Ok(())
-    }
-
-    fn remove_workspace_root(
-        app_data_dir: &Path,
-        target: &WorkspaceCleanupTarget,
-        force: bool,
-        warnings: &mut Vec<String>,
-    ) -> Result<(), String> {
-        let root = Path::new(&target.workspace.root);
-        if !root.is_dir() {
-            let _ = git_command_succeeds(&target.project.root, &["worktree", "prune"]);
-            warnings.push(format!(
-                "Workspace {} was already missing from disk.",
-                target.workspace.name
-            ));
-            return Ok(());
-        }
-
-        if !workspace_discardable(app_data_dir, &target.project, &target.workspace) {
-            return Err("workspace root is not managed by Fluidity".to_string());
-        }
-
-        run_workspace_discard_script(target, warnings);
-
-        if Path::new(&target.project.root).is_dir() {
-            let mut args = vec!["worktree", "remove"];
-            if force {
-                args.push("--force");
-            }
-            args.push(&target.workspace.root);
-            run_git_command(&target.project.root, &args).map(|_| ())
-        } else {
-            fs::remove_dir_all(root).map_err(|error| error.to_string())
-        }
-    }
-
-    pub(super) fn delete_workspace_branch_after_discard(
-        target: &WorkspaceCleanupTarget,
-        warnings: &mut Vec<String>,
-    ) {
-        if !target.project.settings.delete_workspace_branch_on_discard {
-            return;
-        }
-        if target.project.kind != ProjectKind::Git {
-            return;
-        }
-
-        let Some(branch) = target.workspace.git_branch.as_deref() else {
-            return;
-        };
-        if branch.trim().is_empty() {
-            return;
-        }
-
-        if !Path::new(&target.project.root).is_dir() {
-            warnings.push(format!(
-                "Local branch {branch} was kept because the Project root is unavailable."
-            ));
-            return;
-        }
-
-        if !local_git_branch_exists(&target.project.root, branch) {
-            return;
-        }
-
-        if observed_git_branch(ProjectKind::Git, &target.project.root).as_deref() == Some(branch) {
-            warnings.push(format!(
-                "Local branch {branch} was kept because it is checked out in the Project root."
-            ));
-            return;
-        }
-
-        if let Err(error) = run_git_command(&target.project.root, &["branch", "-d", "--", branch]) {
-            warnings.push(format!(
-                "Local branch {branch} was kept because git did not consider it safe to delete: {error}"
-            ));
-        }
-    }
-
-    fn next_workspace_id_after_single_removal(
-        app_state: &PersistedAppState,
-        workspace_id: &str,
-    ) -> Option<String> {
-        let removed_index = app_state
-            .workspace_stack
-            .iter()
-            .position(|id| id == workspace_id)?;
-        let remaining = app_state
-            .workspace_stack
-            .iter()
-            .filter(|id| id.as_str() != workspace_id)
-            .collect::<Vec<_>>();
-
-        remaining
-            .get(removed_index)
-            .or_else(|| remaining.last())
-            .map(|workspace_id| (*workspace_id).clone())
-    }
-
-    pub(super) fn remove_workspaces_from_state(
-        app_state: &mut PersistedAppState,
-        workspace_ids: &[String],
-    ) -> usize {
-        let ids = workspace_ids.iter().cloned().collect::<HashSet<_>>();
-        let original_workspace_count = app_state.open_workspaces.len();
-        app_state
-            .open_workspaces
-            .retain(|workspace| !ids.contains(&workspace.id));
-        app_state
-            .workspace_stack
-            .retain(|workspace_id| !ids.contains(workspace_id));
-        original_workspace_count - app_state.open_workspaces.len()
-    }
-
-    fn local_git_branch_exists(root: &str, branch: &str) -> bool {
-        local_git_branch_names(root)
-            .map(|branches| branches.contains(branch))
-            .unwrap_or(false)
-    }
-
-    fn workspace_discardable(
-        app_data_dir: &Path,
-        project: &RegisteredProject,
-        workspace: &OpenWorkspace,
-    ) -> bool {
-        project.kind == ProjectKind::Git
-            && managed_workspace_root(app_data_dir, Path::new(&workspace.root))
-    }
-
-    fn managed_workspace_root(app_data_dir: &Path, root: &Path) -> bool {
-        let managed_root = app_data_dir.join("workspaces");
-        if root.is_dir() {
-            let Ok(root) = root.canonicalize() else {
-                return false;
-            };
-            let Ok(managed_root) = managed_root.canonicalize() else {
-                return false;
-            };
-            root.starts_with(managed_root)
-        } else {
-            root.starts_with(managed_root)
-        }
-    }
 }
 
 fn dirty_workspace_summary(root: &str) -> Result<Option<DirtyWorkspaceSummary>, String> {
@@ -4732,7 +4184,7 @@ mod tests {
             extra: HashMap::new(),
         };
 
-        let removed = workspace_removal::remove_workspaces_from_state(
+        let removed = workspace_lifecycle::remove_workspaces_from_state(
             &mut app_state,
             &["workspace-b".to_string()],
         );
@@ -4753,7 +4205,7 @@ mod tests {
             vec![workspace.id.clone()],
         );
 
-        let result = workspace_removal::workspace_discard(
+        let result = workspace_lifecycle::workspace_discard(
             &mut app_state,
             &app_data_dir,
             &TerminalState::default(),
@@ -4763,13 +4215,13 @@ mod tests {
         .unwrap();
 
         match result {
-            workspace_removal::WorkspaceDiscardResult::Dirty { dirty_confirmation } => {
+            workspace_lifecycle::WorkspaceDiscardResult::Dirty { dirty_confirmation } => {
                 assert_eq!(dirty_confirmation.dirty_workspace_count, 1);
                 assert!(dirty_confirmation
                     .sample_paths
                     .contains(&"dirty.txt".to_string()));
             }
-            workspace_removal::WorkspaceDiscardResult::Discarded { .. } => {
+            workspace_lifecycle::WorkspaceDiscardResult::Discarded { .. } => {
                 panic!("dirty Workspace should require confirmation")
             }
         }
@@ -4810,7 +4262,7 @@ mod tests {
         ];
         app_state.current_workspace_id = Some(workspace_b.id.clone());
 
-        let result = workspace_removal::workspace_discard(
+        let result = workspace_lifecycle::workspace_discard(
             &mut app_state,
             &app_data_dir,
             &TerminalState::default(),
@@ -4821,7 +4273,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            workspace_removal::WorkspaceDiscardResult::Discarded { .. }
+            workspace_lifecycle::WorkspaceDiscardResult::Discarded { .. }
         ));
         assert_eq!(
             app_state.workspace_stack,
@@ -4866,7 +4318,7 @@ mod tests {
             vec![workspace.id.clone()],
         );
 
-        let result = workspace_removal::workspace_discard(
+        let result = workspace_lifecycle::workspace_discard(
             &mut app_state,
             &app_data_dir,
             &TerminalState::default(),
@@ -4877,7 +4329,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            workspace_removal::WorkspaceDiscardResult::Discarded { .. }
+            workspace_lifecycle::WorkspaceDiscardResult::Discarded { .. }
         ));
         assert!(app_state.open_workspaces.is_empty());
         assert!(app_state.workspace_stack.is_empty());
@@ -4935,7 +4387,7 @@ mod tests {
             workspace_a.id.clone(),
         ];
 
-        let result = workspace_removal::project_disconnect(
+        let result = workspace_lifecycle::project_disconnect(
             &mut app_state,
             &app_data_dir,
             &TerminalState::default(),
@@ -4945,11 +4397,11 @@ mod tests {
         .unwrap();
 
         match result {
-            workspace_removal::ProjectDisconnectResult::Disconnected {
+            workspace_lifecycle::ProjectDisconnectResult::Disconnected {
                 removed_workspace_count,
                 ..
             } => assert_eq!(removed_workspace_count, 2),
-            workspace_removal::ProjectDisconnectResult::Dirty { .. } => {
+            workspace_lifecycle::ProjectDisconnectResult::Dirty { .. } => {
                 panic!("clean Project Disconnect should not require confirmation")
             }
         }
@@ -4978,7 +4430,7 @@ mod tests {
         );
         app_state.settings.debug_layout = true;
 
-        let result = workspace_removal::application_reset(
+        let result = workspace_lifecycle::application_reset(
             &mut app_state,
             &app_data_dir,
             &TerminalState::default(),
@@ -4988,7 +4440,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            workspace_removal::ApplicationResetResult::Reset { .. }
+            workspace_lifecycle::ApplicationResetResult::Reset { .. }
         ));
         assert_eq!(app_state.projects.len(), 0);
         assert_eq!(app_state.open_workspaces.len(), 0);
@@ -5016,8 +4468,8 @@ mod tests {
 
         run_git_command(&project_root_string, &["branch", "safe"]).unwrap();
         let mut warnings = Vec::new();
-        workspace_removal::delete_workspace_branch_after_discard(
-            &workspace_removal::WorkspaceCleanupTarget {
+        workspace_lifecycle::delete_workspace_branch_after_discard(
+            &workspace_lifecycle::WorkspaceCleanupTarget {
                 workspace: test_branch_workspace(&project, "safe"),
                 project: project.clone(),
             },
@@ -5033,8 +4485,8 @@ mod tests {
         run_git_command(&project_root_string, &["add", "unmerged.txt"]).unwrap();
         run_git_command(&project_root_string, &["commit", "-m", "unmerged"]).unwrap();
         run_git_command(&project_root_string, &["checkout", "main"]).unwrap();
-        workspace_removal::delete_workspace_branch_after_discard(
-            &workspace_removal::WorkspaceCleanupTarget {
+        workspace_lifecycle::delete_workspace_branch_after_discard(
+            &workspace_lifecycle::WorkspaceCleanupTarget {
                 workspace: test_branch_workspace(&project, "unmerged"),
                 project: project.clone(),
             },
